@@ -39,6 +39,9 @@ class DataEngine:
 
 
     def _init_db(self):
+        import os
+        if os.getenv("VERCEL") == "1":
+            return
         with self.db_lock:
             try:
                 conn = self._get_conn()

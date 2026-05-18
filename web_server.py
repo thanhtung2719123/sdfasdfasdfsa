@@ -57,7 +57,7 @@ def get_db_conn():
 
 from vnstock import Company
 
-CACHE_DIR = "data_cache"
+CACHE_DIR = "/tmp/data_cache" if os.getenv("VERCEL") == "1" else "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Add a set for dead symbols to prevent repeated API calls
