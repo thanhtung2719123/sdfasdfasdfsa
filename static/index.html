@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNStock Advanced TA - Premium Suite</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <i class="fa-solid fa-chart-line logo-icon"></i>
+                <div class="logo-text">
+                    <span class="logo-title">VNSTOCK</span>
+                    <span class="logo-subtitle">PREMIUM SUITE</span>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="tab-heatmap">
+                    <i class="fa-solid fa-fire-flame-curved nav-icon"></i>
+                    <span>Bản Đồ Nhiệt</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-sector-gtgd">
+                    <i class="fa-solid fa-money-bill-trend-up nav-icon"></i>
+                    <span>GTGD Ngành</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-sector-cap">
+                    <i class="fa-solid fa-building-columns nav-icon"></i>
+                    <span>Vốn hóa Ngành</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-sector-ratio">
+                    <i class="fa-solid fa-scale-balanced nav-icon"></i>
+                    <span>GTGD / Vốn hóa</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-sector-share">
+                    <i class="fa-solid fa-chart-simple nav-icon"></i>
+                    <span>Tỷ trọng Ngành</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-sector-ma">
+                    <i class="fa-solid fa-wave-square nav-icon"></i>
+                    <span>So với MA20/MA60</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-money-flow">
+                    <i class="fa-solid fa-right-left nav-icon"></i>
+                    <span>Dịch chuyển dòng tiền</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-market">
+                    <i class="fa-solid fa-chart-pie nav-icon"></i>
+                    <span>Phân Tích Thị Trường</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-scanner">
+                    <i class="fa-solid fa-radar nav-icon"></i>
+                    <span>Bộ Quét VN302</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-antigravity">
+                    <i class="fa-solid fa-bolt-lightning nav-icon"></i>
+                    <span>Antigravity Vol</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-watchlist">
+                    <i class="fa-solid fa-list-check nav-icon"></i>
+                    <span>Watchlist Tích Lũy</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-backtester">
+                    <i class="fa-solid fa-rotate-left nav-icon"></i>
+                    <span>RSI Backtester</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-liquidity">
+                    <i class="fa-solid fa-droplet nav-icon"></i>
+                    <span>Thanh Khoản</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-market-cap">
+                    <i class="fa-solid fa-coins nav-icon"></i>
+                    <span>Vốn Hóa</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-vol-cap">
+                    <i class="fa-solid fa-percent nav-icon"></i>
+                    <span>GTGD / Vốn Hóa (Vol/Cap)</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="source-selector-area">
+                    <label for="app-source"><i class="fa-solid fa-database"></i> Source:</label>
+                    <select id="app-source" class="source-select">
+                        <option value="KBS">KBS (KB Securities)</option>
+                        <option value="MSN">MSN (Masan Feed)</option>
+                        <option value="VCI">VCI (Vietcap)</option>
+                    </select>
+                </div>
+                <div class="footer-status">
+                    <span class="status-indicator online"></span>
+                    <span class="status-text">Connected to API</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header Bar -->
+            <header class="top-header">
+                <div class="header-left">
+                    <h1 id="page-title">Sơ Đồ Hiệu Suất Ngành</h1>
+                    <p id="page-subtitle">Bản đồ nhiệt sức mạnh dòng tiền và độ rộng thị trường</p>
+                </div>
+                <div class="header-right">
+                    <button id="btn-export-all-market-data" class="btn btn-emerald"><i class="fa-solid fa-file-excel"></i> Xuất Excel tổng hợp</button>
+                    <div class="api-key-badge">
+                        <i class="fa-solid fa-key"></i>
+                        <span>vnstock_74f7...4cf5</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB 1: SECTOR HEATMAP -->
+            <section id="tab-heatmap" class="tab-panel active">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Báº£n Äá»“ Nhiá»‡t</h2>
+                        <button id="btn-load-sector-flow-all" class="btn btn-cyan"><i class="fa-solid fa-database"></i> Náº¡p táº¥t cáº£ tab ngÃ nh 3 nÄƒm</button>
+                    </div>
+                    <div class="heatmap-grid" id="heatmap-cards-container">
+                        <!-- Sector cards will be dynamically injected here -->
+                        <div class="loading-state">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                            <p>Đang tải dữ liệu bản đồ nhiệt...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-sector-gtgd" class="tab-panel sector-flow-panel" data-flow-view="gtgd">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>GTGD Ngành</h2>
+                        <button class="btn btn-cyan btn-load-sector-flow"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table sector-flow-table"></table>
+                    </div>
+                    <p class="sector-flow-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-sector-cap" class="tab-panel sector-flow-panel" data-flow-view="cap">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Vốn hóa Ngành</h2>
+                        <button class="btn btn-cyan btn-load-sector-flow"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table sector-flow-table"></table>
+                    </div>
+                    <p class="sector-flow-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-sector-ratio" class="tab-panel sector-flow-panel" data-flow-view="ratio">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>GTGD / Vốn hóa Ngành</h2>
+                        <button class="btn btn-cyan btn-load-sector-flow"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table sector-flow-table"></table>
+                    </div>
+                    <p class="sector-flow-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-sector-share" class="tab-panel sector-flow-panel" data-flow-view="share">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Tỷ trọng Ngành</h2>
+                        <button class="btn btn-cyan btn-load-sector-flow"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table sector-flow-table"></table>
+                    </div>
+                    <p class="sector-flow-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-sector-ma" class="tab-panel sector-flow-panel" data-flow-view="ma">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>So với MA20 / MA60</h2>
+                        <button class="btn btn-cyan btn-load-sector-flow"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table sector-flow-table"></table>
+                    </div>
+                    <p class="sector-flow-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-money-flow" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Dashboard Dịch chuyển Dòng tiền</h2>
+                        <button id="btn-load-money-flow" class="btn btn-cyan"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm từ database</button>
+                    </div>
+                    <div id="money-flow-periods" class="flow-period-tabs">
+                        <button class="flow-period-btn active" data-period="1d">1 ngày</button>
+                        <button class="flow-period-btn" data-period="3d">3 ngày</button>
+                        <button class="flow-period-btn" data-period="5d">5 ngày</button>
+                        <button class="flow-period-btn" data-period="2w">2 tuần</button>
+                        <button class="flow-period-btn" data-period="1m">1 tháng</button>
+                        <button class="flow-period-btn" data-period="1q">1 quý</button>
+                        <button class="flow-period-btn" data-period="1y">1 năm</button>
+                    </div>
+                    <div id="money-flow-summary" class="flow-summary-strip"></div>
+                    <div class="flow-dashboard-grid">
+                        <div>
+                            <h3 class="flow-title">Dòng tiền tăng tỷ trọng</h3>
+                            <div id="flow-in-list" class="flow-list"></div>
+                        </div>
+                        <div>
+                            <h3 class="flow-title">Dòng tiền giảm tỷ trọng</h3>
+                            <div id="flow-out-list" class="flow-list"></div>
+                        </div>
+                    </div>
+                    <div id="flow-arrow-board" class="flow-arrow-board"></div>
+                    <div class="flow-daily-panel">
+                        <h3 class="flow-title">Cổ phiếu nổi bật từng ngày</h3>
+                        <div class="table-container">
+                            <table class="premium-table" id="flow-daily-leaders-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ngày</th>
+                                        <th>Cổ phiếu nổi bật nhất</th>
+                                        <th>Ngành</th>
+                                        <th>GTGD đổi</th>
+                                        <th>Bị rút mạnh nhất</th>
+                                        <th>Ngành</th>
+                                        <th>GTGD đổi</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <p id="money-flow-meta" class="text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <!-- TAB 2: MARKET ANALYSIS -->
+            <section id="tab-market" class="tab-panel">
+                <div class="metrics-grid">
+                    <div class="metric-card glass glow-cyan">
+                        <span class="metric-label">TRÊN MA20</span>
+                        <span class="metric-value" id="market-ma20">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-cyan">
+                        <span class="metric-label">TRÊN MA50</span>
+                        <span class="metric-value" id="market-ma50">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-cyan">
+                        <span class="metric-label">TRÊN MA100</span>
+                        <span class="metric-value" id="market-ma100">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-cyan">
+                        <span class="metric-label">TRÊN MA200</span>
+                        <span class="metric-value" id="market-ma200">0.0%</span>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Sức Mạnh Hiệu Suất Các Nhóm Ngành</h2>
+                        <button id="btn-export-market" class="btn btn-emerald" disabled><i class="fa-solid fa-file-excel"></i> Xuất Excel Thị Trường</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="market-industry-table">
+                            <thead>
+                                <tr>
+                                    <th>Ngành</th>
+                                    <th>Số Tickers</th>
+                                    <th>Hiệu Suất (Từ 23/03/26)</th>
+                                    <th>So với VNINDEX</th>
+                                    <th>Trạng Thái</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Vui lòng khởi động Quét Bộ lọc để nạp dữ liệu.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2 id="industry-detail-title">Chi Tiết Cổ Phiếu Trong Ngành (Chọn một ngành phía trên)</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="market-detail-table">
+                            <thead>
+                                <tr>
+                                    <th>Mã Ticker</th>
+                                    <th>Hiệu Suất (Từ 23/03/26)</th>
+                                    <th>So với VNINDEX</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted">Chọn một nhóm ngành ở bảng trên để xem chi tiết.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: VN302 SCANNER -->
+            <section id="tab-scanner" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="scanner-controls-row">
+                        <div class="control-group">
+                            <button id="btn-start-scan" class="btn btn-cyan"><i class="fa-solid fa-play"></i> Bắt đầu Quét</button>
+                            <button id="btn-stop-scan" class="btn btn-red" disabled><i class="fa-solid fa-stop"></i> Dừng lại</button>
+                            <button id="btn-export-scan" class="btn btn-emerald" disabled><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="scan-progress-bar" style="width: 0%;"></div>
+                            <span class="progress-text" id="scan-progress-text">Chưa chạy quét (0%)</span>
+                        </div>
+                    </div>
+
+                    <div class="filter-bar glass">
+                        <div class="filter-item">
+                            <label for="filter-sec">Nhóm ngành:</label>
+                            <select id="filter-sec" class="premium-select">
+                                <option value="All">Tất cả ngành</option>
+                            </select>
+                        </div>
+                        <div class="filter-item">
+                            <label for="filter-rsi">RSI:</label>
+                            <select id="filter-rsi" class="premium-select">
+                                <option value="All">Tất cả RSI</option>
+                                <option value="Oversold">Quá bán (&lt;30)</option>
+                                <option value="Overbought">Quá mua (&gt;70)</option>
+                                <option value="Bullish">Tích cực (&gt;50)</option>
+                                <option value="Bearish">Tiêu cực (&lt;50)</option>
+                            </select>
+                        </div>
+                        <div class="filter-item">
+                            <label for="filter-macd">MACD:</label>
+                            <select id="filter-macd" class="premium-select">
+                                <option value="All">Tất cả MACD</option>
+                                <option value="CrossUp">Cắt lên Signal</option>
+                                <option value="CrossDown">Cắt xuống Signal</option>
+                                <option value="Positive">Dương (&gt;0)</option>
+                                <option value="Negative">Âm (&lt;0)</option>
+                            </select>
+                        </div>
+                        <div class="filter-item search-box-wrapper">
+                            <label for="search-scan"><i class="fa-solid fa-magnifying-glass"></i> Tìm kiếm:</label>
+                            <input type="text" id="search-scan" class="premium-input" placeholder="Nhập mã CP...">
+                        </div>
+                    </div>
+
+                    <div class="table-container scrollable-table-container">
+                        <table class="premium-table" id="scanner-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Giá</th>
+                                    <th>% Tăng 23/03/26</th>
+                                    <th>MA20</th>
+                                    <th>MA50</th>
+                                    <th>MA100</th>
+                                    <th>MA200</th>
+                                    <th>Đỉnh 52w</th>
+                                    <th>Đáy 52w</th>
+                                    <th>Đột phá</th>
+                                    <th>RSI</th>
+                                    <th>RSI Div</th>
+                                    <th>MACD</th>
+                                    <th>MACD Div</th>
+                                    <th>Ngành</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="15" class="text-center text-muted">Nhấn "Bắt đầu Quét" để tiến hành quét toàn bộ 302 mã.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: ANTIGRAVITY VOLATILITY -->
+            <section id="tab-antigravity" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="scanner-controls-row">
+                        <div class="control-group">
+                            <button id="btn-start-anti" class="btn btn-cyan"><i class="fa-solid fa-play"></i> Quét Tín Hiệu</button>
+                            <button id="btn-stop-anti" class="btn btn-red" disabled><i class="fa-solid fa-stop"></i> Dừng</button>
+                            <button id="btn-export-anti" class="btn btn-emerald" disabled><i class="fa-solid fa-file-excel"></i> Xuất Báo Cáo</button>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="anti-progress-bar" style="width: 0%;"></div>
+                            <span class="progress-text" id="anti-progress-text">Sẵn sàng (0%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metrics-grid margin-top-20">
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Số ngày setup tb</span>
+                        <span class="metric-value" id="anti-avg-days">0.0</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Win Rate 5D</span>
+                        <span class="metric-value" id="anti-wr-5d">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Win Rate 10D</span>
+                        <span class="metric-value" id="anti-wr-10d">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Win Rate 20D</span>
+                        <span class="metric-value" id="anti-wr-20d">0.0%</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tỷ lệ R/R tb</span>
+                        <span class="metric-value" id="anti-avg-rr">0.0</span>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Tín Hiệu Antigravity Volatility Setup Phát Hiện</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="anti-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Ngày Tín Hiệu</th>
+                                    <th>Số Ngày Nén</th>
+                                    <th>Hiệu Suất 5D</th>
+                                    <th>Hiệu Suất 10D</th>
+                                    <th>Hiệu Suất 20D</th>
+                                    <th>R/R Đạt Được</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">Nhấn "Quét Tín Hiệu" để phân tích dữ liệu lịch sử setups.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 5: ANTIGRAVITY WATCHLIST -->
+            <section id="tab-watchlist" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="scanner-controls-row">
+                        <div class="control-group">
+                            <button id="btn-start-watch" class="btn btn-cyan"><i class="fa-solid fa-play"></i> Quét Tích Lũy</button>
+                            <button id="btn-stop-watch" class="btn btn-red" disabled><i class="fa-solid fa-stop"></i> Dừng</button>
+                            <button id="btn-export-watch" class="btn btn-emerald" disabled><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="watch-progress-bar" style="width: 0%;"></div>
+                            <span class="progress-text" id="watch-progress-text">Sẵn sàng (0%)</span>
+                        </div>
+                    </div>
+
+                    <div class="watchlist-info-box alert glass">
+                        <i class="fa-solid fa-circle-info info-icon"></i>
+                        <p><strong>Tiêu chí Watchlist Tích Lũy (Sideways Consolidation):</strong> Cổ phiếu đang nằm trong vùng tích lũy tối thiểu 5 phiên liên tiếp với biên độ biến động cực hẹp (hộp Darvas biên ±2.5%) cùng khối lượng giao dịch cạn kiệt (Volume &lt; MA20 volume).</p>
+                    </div>
+
+                    <div class="table-container margin-top-20">
+                        <table class="premium-table" id="watch-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Giá Hiện Tại</th>
+                                    <th>Số Phiên Tích Lũy</th>
+                                    <th>Tỷ Lệ Vol/MA20</th>
+                                    <th>Biên Độ 5 Phiên %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Bắt đầu quét tích lũy để lọc ra các cổ phiếu cạn kiệt cung chuẩn bị đột phá.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 6: RSI BACKTESTER -->
+            <section id="tab-backtester" class="tab-panel">
+                <div class="backtester-grid">
+                    <!-- Control Sidebar -->
+                    <div class="backtester-form-panel glass">
+                        <h2 class="form-title"><i class="fa-solid fa-sliders"></i> Tham Số Thử Nghiệm</h2>
+                        <form id="backtest-form" class="premium-form">
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-ticker">Mã Cổ Phiếu:</label>
+                                    <select id="bt-ticker" class="premium-select">
+                                        <!-- Will populate dynamically -->
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-start">Từ ngày:</label>
+                                    <input type="date" id="bt-start" class="premium-input" value="2025-01-01">
+                                </div>
+                                <div class="form-item">
+                                    <label for="bt-end">Đến ngày:</label>
+                                    <input type="date" id="bt-end" class="premium-input" value="2026-05-18">
+                                </div>
+                            </div>
+
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-capital">Vốn Ban Đầu (VND):</label>
+                                    <input type="number" id="bt-capital" class="premium-input" value="100000000">
+                                </div>
+                                <div class="form-item">
+                                    <label for="bt-pos-size">Tỷ Trọng Mua (%):</label>
+                                    <input type="number" id="bt-pos-size" class="premium-input" value="100" min="1" max="100">
+                                </div>
+                            </div>
+
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-rsi-period">Chu Kỳ RSI:</label>
+                                    <input type="number" id="bt-rsi-period" class="premium-input" value="14">
+                                </div>
+                            </div>
+
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-buy-th">Ngưỡng Mua RSI (&lt;):</label>
+                                    <input type="number" id="bt-buy-th" class="premium-input" value="30">
+                                </div>
+                                <div class="form-item">
+                                    <label for="bt-sell-th">Ngưỡng Bán RSI (&gt;):</label>
+                                    <input type="number" id="bt-sell-th" class="premium-input" value="70">
+                                </div>
+                            </div>
+
+                            <div class="form-group-row">
+                                <div class="form-item">
+                                    <label for="bt-sl">Cắt Lỗ Stop Loss (%):</label>
+                                    <input type="text" id="bt-sl" class="premium-input" value="7.0" placeholder="none hoặc số %">
+                                </div>
+                                <div class="form-item">
+                                    <label for="bt-tp">Chốt Lời Take Profit (%):</label>
+                                    <input type="text" id="bt-tp" class="premium-input" value="none" placeholder="none hoặc số %">
+                                </div>
+                            </div>
+
+                            <button type="submit" id="btn-run-backtest" class="btn btn-cyan btn-full"><i class="fa-solid fa-rotate"></i> Chạy Thử Nghiệm (Backtest)</button>
+                            <button type="button" id="btn-export-backtest" class="btn btn-emerald btn-full margin-top-10" disabled><i class="fa-solid fa-file-excel"></i> Xuất Báo Cáo Giao Dịch</button>
+                        </form>
+                    </div>
+
+                    <!-- Performance and charts -->
+                    <div class="backtester-results-panel">
+                        <!-- Metrics Grid -->
+                        <div class="metrics-grid">
+                            <div class="metric-card glass glow-cyan">
+                                <span class="metric-label">Tổng Lợi Nhuận %</span>
+                                <span class="metric-value" id="bt-metric-return">0.00%</span>
+                            </div>
+                            <div class="metric-card glass glow-cyan">
+                                <span class="metric-label">Tỷ Lệ Thắng (Win Rate)</span>
+                                <span class="metric-value" id="bt-metric-winrate">0.00%</span>
+                            </div>
+                            <div class="metric-card glass glow-cyan">
+                                <span class="metric-label">Số Giao Dịch</span>
+                                <span class="metric-value" id="bt-metric-trades">0</span>
+                            </div>
+                            <div class="metric-card glass glow-cyan">
+                                <span class="metric-label">Sharpe Ratio</span>
+                                <span class="metric-value" id="bt-metric-sharpe">0.00</span>
+                            </div>
+                            <div class="metric-card glass glow-cyan">
+                                <span class="metric-label">Sụt giảm lớn nhất (Max DD)</span>
+                                <span class="metric-value" id="bt-metric-maxdd">0.00%</span>
+                            </div>
+                        </div>
+
+                        <!-- Chart container -->
+                        <div class="panel-card glass margin-top-20">
+                            <div class="card-header">
+                                <h2>Đồ Thị Tăng Trưởng Tài Sản (Equity Curve)</h2>
+                            </div>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="equity-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Trade Logs -->
+                        <div class="panel-card glass margin-top-20">
+                            <div class="card-header">
+                                <h2>Nhật Ký Khớp Lệnh Chi Tiết</h2>
+                            </div>
+                            <div class="table-container">
+                                <table class="premium-table" id="bt-trades-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Ngày Mua (Entry)</th>
+                                            <th>Ngày Bán (Exit)</th>
+                                            <th>Giá Mua</th>
+                                            <th>Giá Bán</th>
+                                            <th>Lợi Nhuận (VND)</th>
+                                            <th>Lợi Nhuận %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">Chưa có kết quả giao dịch. Nhấn "Chạy Thử Nghiệm" để chạy.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 7: THANH KHOẢN (LIQUIDITY) -->
+            <section id="tab-liquidity" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="liquidity-controls-row" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                        <div class="control-group" style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <button id="btn-sync-liq" class="btn btn-emerald"><i class="fa-solid fa-cloud-arrow-down"></i> Đồng bộ Data 3 năm</button>
+                            
+                            <div id="liq-single-controls" style="display: flex; align-items: center; gap: 8px;">
+                                <label for="liq-date" style="font-weight: bold; color: #00e5ff; white-space: nowrap; margin: 0;">Xem ngày:</label>
+                                <input type="date" id="liq-date" class="premium-input" value="2026-05-18">
+                            </div>
+                            <button id="btn-load-liquidity" class="btn btn-cyan" style="margin-left: 10px;"><i class="fa-solid fa-arrows-rotate"></i> Truy Vấn Tức Thì</button>
+                        </div>
+                        <div class="progress-bar-container" id="liq-progress-wrapper" style="display: none; flex-grow: 1; max-width: 400px; margin: 0;">
+                            <div class="progress-bar" id="liq-progress-bar" style="width: 0%; background: linear-gradient(90deg, #00e5ff, #0088ff);"></div>
+                            <span class="progress-text" id="liq-progress-text">Sẵn sàng (0%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                
+
+                <div class="metrics-grid margin-top-20">
+                    <div class="metric-card glass glow-emerald">
+                        <span class="metric-label">Tổng Giá Trị Thanh Khoản VN302</span>
+                        <span class="metric-value" id="liq-total-value">0 VND</span>
+                    </div>
+                    <div class="metric-card glass glow-emerald">
+                        <span class="metric-label">Tổng Khối Lượng CP Giao Dịch</span>
+                        <span class="metric-value" id="liq-total-volume">0 CP</span>
+                    </div>
+                    <div class="metric-card glass glow-emerald">
+                        <span class="metric-label">Cổ Phiếu Thanh Khoản Kỷ Lục</span>
+                        <span class="metric-value" id="liq-leader-ticker">N/A</span>
+                    </div>
+                    <div class="metric-card glass glow-emerald">
+                        <span class="metric-label">Thanh Khoản Bình Quân / CP</span>
+                        <span class="metric-value" id="liq-avg-value">0 VND</span>
+                    </div>
+                </div>
+
+                <div class="liquidity-visual-grid margin-top-20">
+                    <!-- Top 15 chart -->
+                    <div class="panel-card glass">
+                        <div class="card-header">
+                            <h2>Top 15 Cổ Phiếu Có Thanh Khoản Lớn Nhất Phiên</h2>
+                        </div>
+                        <div class="chart-canvas-wrapper" style="height: 350px;">
+                            <canvas id="liquidity-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Visual leaderboard -->
+                    <div class="panel-card glass">
+                        <div class="card-header">
+                            <h2>Bảng Xếp Hạng Dòng Tiền (Leaderboard)</h2>
+                        </div>
+                        <div class="leaderboard-container scrollable-leaderboard-container" id="liquidity-leaderboard" style="max-height: 350px; overflow-y: auto;">
+                            <div class="loading-state">
+                                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                <p>Vui lòng nhấn "Tải Dữ Liệu" để hiển thị biểu đồ dòng tiền.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Bảng Chi Tiết Thanh Khoản Khớp Lệnh Thực Tế HOSE</h2>
+                        <div class="filter-item search-box-wrapper" style="width: 250px;">
+                            <input type="text" id="search-liquidity" class="premium-input" placeholder="Tìm nhanh mã...">
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="liquidity-table">
+                            <thead>
+                                <tr>
+                                    <th>Mã Ticker</th>
+                                    <th>Nhóm Ngành</th>
+                                    <th>Giá Đóng Cửa (VND)</th>
+                                    <th>Khối Lượng Khớp (CP)</th>
+                                    <th>Thanh Khoản Chính Thức (VND)</th>
+                                    <th>Tỷ Lệ vs TOP 1</th>
+                                    <th>Phân Loại</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">Vui lòng nhấn "Tải Dữ Liệu" để truy vấn dữ liệu thanh khoản chính xác từ sở giao dịch.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 8: VỐN HÓA (MARKET CAP ANALYZER) -->
+            <section id="tab-market-cap" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="liquidity-controls-row" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                        <div class="control-group" style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <button id="btn-sync-cap" class="btn btn-emerald" style="margin: 0;"><i class="fa-solid fa-cloud-arrow-down"></i> Đồng bộ Data 3 năm</button>
+                            
+                            <!-- Chế độ xem -->
+                            <div class="filter-item" style="margin: 0;">
+                                <select id="cap-mode" class="premium-select" style="min-width: 140px; padding: 4px 8px;">
+                                    <option value="single">Xem 1 ngày</option>
+                                    <option value="range">Xuất theo khoảng</option>
+                                </select>
+                            </div>
+                            
+                            <div id="cap-single-controls" style="display: flex; align-items: center; gap: 8px;">
+                                <label for="cap-date" style="font-weight: bold; color: #00e5ff; white-space: nowrap; margin: 0;">Xem ngày:</label>
+                                <input type="date" id="cap-date" class="premium-input" value="2026-05-18">
+                            </div>
+                            
+                            <!-- Nhập khoảng thời gian -->
+                            <div id="cap-range-controls" style="display: none; align-items: center; gap: 8px;">
+                                <label for="cap-start-date" style="font-weight: bold; color: #a78bfa; white-space: nowrap; margin: 0;">Từ ngày:</label>
+                                <input type="date" id="cap-start-date" class="premium-input" value="2025-01-01" style="width: 135px; padding: 4px 8px;">
+                                <label for="cap-end-date" style="font-weight: bold; color: #a78bfa; white-space: nowrap; margin: 0;">đến:</label>
+                                <input type="date" id="cap-end-date" class="premium-input" value="2026-05-18" style="width: 135px; padding: 4px 8px;">
+                            </div>
+                            
+                            <button id="btn-load-cap" class="btn btn-cyan" style="margin: 0;"><i class="fa-solid fa-arrows-rotate"></i> Truy Vấn Tức Thì</button>
+                            <button id="btn-export-cap" class="btn btn-emerald" style="margin: 0;"><i class="fa-solid fa-file-excel"></i> Xuất Báo Cáo</button>
+                            
+                            <!-- Báo trạng thái cào ngầm số cổ phiếu lưu hành -->
+                            <div id="shares-crawler-status-box" style="display: flex; align-items: center; gap: 8px; background: rgba(0, 229, 255, 0.05); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(0, 229, 255, 0.15); transition: all 0.3s ease; margin-left: 5px;">
+                                <i class="fa-solid fa-spinner fa-spin text-cyan" id="shares-crawler-icon"></i>
+                                <span style="font-weight: bold; color: #e2e8f0; font-size: 13px;" id="shares-crawler-text">Đang kết nối bộ quét...</span>
+                                <button id="btn-sync-shares" class="btn-crawler-refresh" title="Đồng bộ lại số lượng cổ phiếu từ đầu" style="background: none; border: none; color: #a0aec0; cursor: pointer; padding: 2px 5px; font-size: 12px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; margin-left: 5px;" onmouseover="this.style.color='#00e5ff'" onmouseout="this.style.color='#a0aec0'">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="progress-bar-container" id="cap-progress-wrapper" style="display: none; flex-grow: 1; max-width: 400px; margin: 0;">
+                            <div class="progress-bar" id="cap-progress-bar" style="width: 0%;"></div>
+                            <span class="progress-text" id="cap-progress-text">Sẵn sàng (0%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metrics-grid margin-top-20" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tổng Vốn Hóa Phiên</span>
+                        <span class="metric-value" id="cap-total-value">0 tỷ VND</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">CP Vốn Hóa Lớn Nhất</span>
+                        <span class="metric-value" id="cap-leader-ticker">N/A</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tổng Thanh Khoản Phiên</span>
+                        <span class="metric-value" id="cap-total-liquidity">0 tỷ VND</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">CP Khớp Lệnh Lớn Nhất</span>
+                        <span class="metric-value" id="cap-liquidity-leader">N/A</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tiến Độ Quét Vốn Hóa</span>
+                        <span class="metric-value" id="cap-progress-indicator">0%</span>
+                    </div>
+                </div>
+
+                <!-- SINGLE DAY VISUALS -->
+                <div id="cap-single-visuals" class="liquidity-visual-grid margin-top-20">
+                    <!-- Top 10 chart -->
+                    <div class="panel-card glass">
+                        <div class="card-header">
+                            <h2>Top 10 Cổ Phiếu Vốn Hóa Lớn Nhất (Tỷ VND)</h2>
+                        </div>
+                        <div class="chart-canvas-wrapper" style="height: 350px;">
+                            <canvas id="market-cap-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Visual leaderboard -->
+                    <div class="panel-card glass">
+                        <div class="card-header">
+                            <h2>Bảng Xếp Hạng Vốn Hóa (Leaderboard)</h2>
+                        </div>
+                        <div class="leaderboard-container scrollable-leaderboard-container" id="cap-leaderboard" style="max-height: 350px; overflow-y: auto;">
+                            <div class="loading-state">
+                                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                <p>Vui lòng nhấn "Quét Vốn Hóa" để hiển thị biểu đồ vốn hóa.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RANGE VISUALS (hidden by default) -->
+                <div id="cap-range-visuals" style="display: none;" class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Tổng Hợp Quét Theo Khoảng Thời Gian</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table">
+                            <thead>
+                                <tr>
+                                    <th>Ngày Giao Dịch</th>
+                                    <th>Tổng Vốn Hóa (Tỷ VND)</th>
+                                    <th>Tổng Thanh Khoản (Tỷ VND)</th>
+                                    <th>Mã Vốn Hóa Lớn Nhất</th>
+                                    <th>Mã Thanh Khoản Lớn Nhất</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cap-range-table-body">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Vui lòng chọn Khoảng thời gian và nhấn "Quét Vốn Hóa" để bắt đầu quét tổng hợp.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Bảng Chi Tiết Vốn Hóa 302 Mã CP Theo Nhóm Ngành</h2>
+                        <div class="scanner-controls-row" style="gap: 15px; margin: 0;">
+                            <div class="filter-item" style="margin: 0;">
+                                <select id="filter-cap-industry" class="premium-select" style="min-width: 180px;">
+                                    <option value="All">Tất cả ngành</option>
+                                </select>
+                            </div>
+                            <div class="filter-item search-box-wrapper" style="width: 200px; margin: 0;">
+                                <input type="text" id="search-cap" class="premium-input" placeholder="Tìm nhanh mã...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="cap-table">
+                            <thead>
+                                <tr>
+                                    <th>Hạng</th>
+                                    <th>Mã Ticker</th>
+                                    <th>Nhóm Ngành</th>
+                                    <th>Giá Đóng Cửa (VND)</th>
+                                    <th>Số Lượng Lưu Hành (CP)</th>
+                                    <th>Vốn Hóa Thực Tế (Tỷ VND)</th>
+                                    <th>Thanh Khoản (Tỷ VND)</th>
+                                    <th>Tỷ Lệ vs TOP 1</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cap-table-body">
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted">Vui lòng nhấn "Quét Vốn Hóa" để truy vấn và tính toán vốn hóa thực tế của các doanh nghiệp.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 9: GTGD / VỐN HÓA (VOL/CAP ANALYZER) -->
+            <section id="tab-vol-cap" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="liquidity-controls-row" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                        <div class="control-group" style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <!-- Xem theo ngày -->
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label for="vol-cap-date" style="font-weight: bold; color: #00e5ff; white-space: nowrap; margin: 0;">Xem ngày:</label>
+                                <input type="date" id="vol-cap-date" class="premium-input" value="2026-05-18">
+                            </div>
+                            
+                            <button id="btn-sync-vol-cap" class="btn btn-emerald" style="margin: 0;"><i class="fa-solid fa-cloud-arrow-down"></i> Đồng bộ Data 3 năm</button>
+                            <button id="btn-load-vol-cap" class="btn btn-cyan" style="margin: 0;"><i class="fa-solid fa-arrows-rotate"></i> Truy Vấn Tức Thì</button>
+                            <button id="btn-export-vol-cap-3y" class="btn btn-emerald" style="margin: 0;"><i class="fa-solid fa-file-excel"></i> Xuất Excel 3 Năm</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metrics-grid margin-top-20" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tổng Vốn Hóa Phiên</span>
+                        <span class="metric-value" id="vol-cap-total-value">0 tỷ VND</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tổng Thanh Khoản Phiên</span>
+                        <span class="metric-value" id="vol-cap-total-liquidity">0 VND</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">Tỷ Lệ Vol/Cap Bình Quân</span>
+                        <span class="metric-value" id="vol-cap-avg-ratio">0.00%</span>
+                    </div>
+                    <div class="metric-card glass glow-purple">
+                        <span class="metric-label">CP Vol/Cap Lớn Nhất</span>
+                        <span class="metric-value" id="vol-cap-leader-ticker">N/A</span>
+                    </div>
+                </div>
+
+                <div class="panel-card glass margin-top-20">
+                    <div class="card-header">
+                        <h2>Bảng Chi Tiết Tỷ Lệ GTGD / Vốn Hóa (Vol/Cap) 302 Mã CP</h2>
+                        <div class="scanner-controls-row" style="gap: 15px; margin: 0;">
+                            <div class="filter-item" style="margin: 0;">
+                                <select id="filter-vol-cap-industry" class="premium-select" style="min-width: 180px;">
+                                    <option value="All">Tất cả ngành</option>
+                                </select>
+                            </div>
+                            <div class="filter-item search-box-wrapper" style="width: 200px; margin: 0;">
+                                <input type="text" id="search-vol-cap" class="premium-input" placeholder="Tìm nhanh mã...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table" id="vol-cap-table">
+                            <thead>
+                                <tr>
+                                    <th>Hạng</th>
+                                    <th>Mã Ticker</th>
+                                    <th>Nhóm Ngành</th>
+                                    <th>Giá Đóng Cửa (VND)</th>
+                                    <th>Khối Lượng Khớp (CP)</th>
+                                    <th>Số Lượng Lưu Hành (CP)</th>
+                                    <th>Thanh Khoản (VND)</th>
+                                    <th>Vốn Hóa (Tỷ VND)</th>
+                                    <th>Tỷ Lệ Vol/Cap</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vol-cap-table-body">
+                                <tr>
+                                    <td colspan="9" class="text-center text-muted">Vui lòng nhấn "Truy Vấn Tức Thì" để nạp dữ liệu tỷ lệ giá trị giao dịch / vốn hóa.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Ticker Detail Candlestick Modal -->
+    <div class="modal glass" id="ticker-modal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 id="modal-ticker-title">Đồ Thị Nến Kỹ Thuật</h3>
+                <span class="close-modal-btn" id="btn-close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="chart-canvas-wrapper" style="height: 400px;">
+                    <canvas id="modal-candlestick-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
