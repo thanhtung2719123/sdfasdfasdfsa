@@ -1,4 +1,9 @@
+import os
 import sqlite3
+try:
+    import libsql
+except ImportError:
+    import sqlite3 as libsql
 import threading
 import time
 import pandas as pd
@@ -29,6 +34,12 @@ class DataEngine:
         self._init_db()
 
     def _get_conn(self):
+        db_url = os.getenv("TURSO_URL")
+        db_token = os.getenv("TURSO_AUTH_TOKEN")
+        
+        if db_url and db_token:
+            return libsql.connect(db_url, auth_token=db_token)
+
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
@@ -209,4 +220,3 @@ class DataEngine:
         if not api_df.empty:
             self._write_cache(symbol, api_df)
         return api_df
-

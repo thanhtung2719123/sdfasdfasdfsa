@@ -11,6 +11,10 @@ import queue
 import threading
 import io
 import sqlite3
+try:
+    import libsql
+except ImportError:
+    import sqlite3 as libsql
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -46,6 +50,12 @@ for ind, symbols in list(VN302_INDUSTRIES.items()):
 SCAN_LIST = [s for s in SCAN_LIST if s not in DELISTED_OR_SUSPENDED]
 
 def get_db_conn():
+    db_url = os.getenv("TURSO_URL")
+    db_token = os.getenv("TURSO_AUTH_TOKEN")
+    
+    if db_url and db_token:
+        return libsql.connect(db_url, auth_token=db_token)
+        
     conn = sqlite3.connect("market_cache.db", timeout=30.0)
     # Kích hoạt chế độ WAL (Write-Ahead Logging) giúp nhiều luồng đọc/ghi đồng thời không bị khóa DB
     try:
@@ -3127,9 +3137,11 @@ def export_vol_cap_history():
 @app.on_event("startup")
 def on_startup():
     init_db_liquidity()
-    start_background_crawler()
     init_db_shares()
-    start_shares_crawler()
+    # Bypass crawlers in serverless environments to prevent request timeouts
+    if os.getenv("VERCEL") != "1":
+        start_background_crawler()
+        start_shares_crawler()
 
 # Mount Static Files (Must be registered last to avoid route conflicts)
 app.mount("/", StaticFiles(directory="static"), name="static")

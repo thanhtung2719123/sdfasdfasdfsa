@@ -7,3 +7,4 @@ vnstock>=2.0.0
 uvicorn>=0.20.0
 jinja2>=3.1.2
 gunicorn>=20.1.0
+libsql>=0.1.0
