@@ -46,7 +46,7 @@ for ind, symbols in list(VN302_INDUSTRIES.items()):
 SCAN_LIST = [s for s in SCAN_LIST if s not in DELISTED_OR_SUSPENDED]
 
 def get_db_conn():
-    conn = sqlite3.connect("market_cache.db", timeout=30.0)
+    from db_adapter import get_db_conn; return get_db_conn()
     # Kích hoạt chế độ WAL (Write-Ahead Logging) giúp nhiều luồng đọc/ghi đồng thời không bị khóa DB
     try:
         conn.execute("PRAGMA journal_mode=WAL;")

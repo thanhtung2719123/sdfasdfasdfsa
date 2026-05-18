@@ -29,7 +29,7 @@ class DataEngine:
         self._init_db()
 
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        from db_adapter import get_db_conn; return get_db_conn(self.db_path)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
