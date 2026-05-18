@@ -10,18 +10,13 @@ env/
 .env
 
 # Local database caches & cache directories
+market_cache.db
 market_cache.db-wal
 market_cache.db-shm
 data_cache/
-
 
 # Temporary and office files
 ~$*
 *.tmp
 .idea/
 .vscode/
-
-# Large CSV database dumps
-*.csv
-export_to_csv.py
-

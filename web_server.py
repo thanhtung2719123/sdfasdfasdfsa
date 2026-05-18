@@ -28,7 +28,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 # Expose API Key Setup
 try:
-    from vnstock import register_user
+    from main import register_user
     register_user(api_key='vnstock_74f708b54d2a500d9fc23da9967a4cf5')
 except Exception as e:
     print(f"Warning: could not register API key: {e}")
@@ -46,7 +46,7 @@ for ind, symbols in list(VN302_INDUSTRIES.items()):
 SCAN_LIST = [s for s in SCAN_LIST if s not in DELISTED_OR_SUSPENDED]
 
 def get_db_conn():
-    from db_adapter import get_db_conn; return get_db_conn()
+    conn = sqlite3.connect("market_cache.db", timeout=30.0)
     # Kích hoạt chế độ WAL (Write-Ahead Logging) giúp nhiều luồng đọc/ghi đồng thời không bị khóa DB
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
@@ -57,7 +57,7 @@ def get_db_conn():
 
 from vnstock import Company
 
-CACHE_DIR = "/tmp/data_cache" if os.getenv("VERCEL") == "1" else "data_cache"
+CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Add a set for dead symbols to prevent repeated API calls
@@ -3126,10 +3126,6 @@ def export_vol_cap_history():
 
 @app.on_event("startup")
 def on_startup():
-    import os
-    if os.getenv("VERCEL") == "1":
-        print("Vercel environment: bypassing background crawlers and database writes.")
-        return
     init_db_liquidity()
     start_background_crawler()
     init_db_shares()

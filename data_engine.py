@@ -29,7 +29,7 @@ class DataEngine:
         self._init_db()
 
     def _get_conn(self):
-        from db_adapter import get_db_conn; return get_db_conn(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
@@ -39,9 +39,6 @@ class DataEngine:
 
 
     def _init_db(self):
-        import os
-        if os.getenv("VERCEL") == "1":
-            return
         with self.db_lock:
             try:
                 conn = self._get_conn()
