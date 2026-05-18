@@ -28,7 +28,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 # Expose API Key Setup
 try:
-    from main import register_user
+    from vnstock import register_user
     register_user(api_key='vnstock_74f708b54d2a500d9fc23da9967a4cf5')
 except Exception as e:
     print(f"Warning: could not register API key: {e}")
