@@ -3126,6 +3126,10 @@ def export_vol_cap_history():
 
 @app.on_event("startup")
 def on_startup():
+    import os
+    if os.getenv("VERCEL") == "1":
+        print("Vercel environment: bypassing background crawlers and database writes.")
+        return
     init_db_liquidity()
     start_background_crawler()
     init_db_shares()

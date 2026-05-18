@@ -113,6 +113,10 @@ def get_db_conn(db_path='market_cache.db'):
         pg_conn = psycopg2.connect(db_url)
         return PgConnectionWrapper(pg_conn)
     
+    # On Vercel, force read-only mode for SQLite to prevent write locks on the read-only filesystem
+    if os.getenv("VERCEL") == "1":
+        return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30.0)
+
     # Otherwise, fallback transparently to local SQLite
     conn = sqlite3.connect(db_path, timeout=30.0)
     try:
