@@ -10,6 +10,7 @@ import time
 import queue
 import threading
 import io
+import json
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -52,6 +53,7 @@ from vnstock import Company
 
 CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
+API_RESPONSE_MEMORY_CACHE = {}
 
 # Add a set for dead symbols to prevent repeated API calls
 
@@ -510,6 +512,93 @@ def calculate_percentile(values, current_value):
     return round((sum(v <= current_value for v in clean_values) / len(clean_values)) * 100.0, 1)
 
 
+def init_db_api_response_cache():
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_response_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+        print("Database api_response_cache table verified.")
+    except Exception as e:
+        print(f"Error initializing api_response_cache table: {e}")
+
+
+def json_safe(value):
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [json_safe(v) for v in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        if np.isnan(value) or np.isinf(value):
+            return None
+        return float(value)
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.strftime("%Y-%m-%d")
+    if pd.isna(value) if not isinstance(value, (str, bytes, bytearray, dict, list, tuple)) else False:
+        return None
+    return value
+
+
+def get_api_response_cache(cache_key: str):
+    try:
+        if cache_key in API_RESPONSE_MEMORY_CACHE:
+            data = API_RESPONSE_MEMORY_CACHE[cache_key]
+            if isinstance(data, dict):
+                data = dict(data)
+                data["cache_hit"] = True
+                data["memory_cache_hit"] = True
+            return data
+
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT payload FROM api_response_cache WHERE cache_key = ?", (cache_key,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        data = json.loads(row[0])
+        API_RESPONSE_MEMORY_CACHE[cache_key] = data
+        if isinstance(data, dict):
+            data["cache_hit"] = True
+        return data
+    except Exception as e:
+        print(f"API response cache read failed for {cache_key}: {e}")
+        return None
+
+
+def set_api_response_cache(cache_key: str, payload: Dict[str, Any]):
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO api_response_cache (cache_key, payload, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                cache_key,
+                json.dumps(json_safe(payload), ensure_ascii=False, separators=(",", ":")),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        API_RESPONSE_MEMORY_CACHE[cache_key] = json_safe(payload)
+    except Exception as e:
+        print(f"API response cache write failed for {cache_key}: {e}")
+
+
 def get_latest_complete_market_date(cursor, min_count: int = 100):
     cursor.execute("""
         SELECT time, COUNT(DISTINCT symbol) AS ticker_count
@@ -616,11 +705,14 @@ def ensure_price_return_cache():
 
 def warm_price_return_response_cache():
     try:
-        print("Warming price/return response cache...")
+        print("Warming API response cache...")
         build_price_return_history(3)
-        print("Price/return response cache is ready.")
+        build_sector_flow_history(3)
+        build_sector_flow_snapshot(3, period="60d")
+        build_notable_stocks_dashboard()
+        print("API response cache is ready.")
     except Exception as e:
-        print(f"Price/return cache warmup failed: {e}")
+        print(f"API response cache warmup failed: {e}")
 
 
 def start_price_return_cache_warmer():
@@ -640,7 +732,13 @@ SECTOR_FLOW_PERIODS = {
 }
 
 
-def build_sector_flow_snapshot(years: int = 3, period: str = "60d"):
+def build_sector_flow_snapshot(years: int = 3, period: str = "60d", use_cache: bool = True):
+    cache_key = f"sector_flow_snapshot:{years}:{period}"
+    if use_cache:
+        cached = get_api_response_cache(cache_key)
+        if cached:
+            return cached
+
     period_config = SECTOR_FLOW_PERIODS.get(period, SECTOR_FLOW_PERIODS["60d"])
     lookback_sessions = period_config["sessions"]
     conn = get_db_conn()
@@ -831,7 +929,7 @@ def build_sector_flow_snapshot(years: int = 3, period: str = "60d"):
             "TopOutSector": top_out_sector
         })
 
-    return {
+    result = {
         "start_date": start_date,
         "end_date": latest_date,
         "compare_date": compare_date,
@@ -844,9 +942,17 @@ def build_sector_flow_snapshot(years: int = 3, period: str = "60d"):
         "history_points": int(grouped["Date"].nunique()),
         "source": "database"
     }
+    set_api_response_cache(cache_key, result)
+    return result
 
 
-def build_sector_flow_history(years: int = 3):
+def build_sector_flow_history(years: int = 3, use_cache: bool = True):
+    cache_key = f"sector_flow_history:{years}"
+    if use_cache:
+        cached = get_api_response_cache(cache_key)
+        if cached:
+            return cached
+
     conn = get_db_conn()
     cursor = conn.cursor()
     max_date_str = get_latest_complete_market_date(cursor)
@@ -953,7 +1059,7 @@ def build_sector_flow_history(years: int = 3):
             stat_rows["95%"][industry] = round(float(s.quantile(0.95)), 4)
         return stat_rows
 
-    return {
+    result = {
         "start_date": start_date,
         "end_date": max_date_str,
         "years": years,
@@ -967,13 +1073,26 @@ def build_sector_flow_history(years: int = 3):
         },
         "source": "database"
     }
+    set_api_response_cache(cache_key, result)
+    return result
 
 
-def build_price_return_history(years: int = 3):
+def build_price_return_history(years: int = 3, use_cache: bool = True):
+    fixed_cache_key = f"price_return_history:{years}"
+    if use_cache:
+        cached = get_api_response_cache(fixed_cache_key)
+        if cached:
+            return cached
+
     cache_status = ensure_price_return_cache()
     if cache_status.get("error"):
         return {"error": cache_status["error"]}
     cache_key = f"{years}:{cache_status.get('max_date')}:{cache_status.get('rows')}"
+    persisted_cache_key = f"price_return_history:{cache_key}"
+    if use_cache:
+        cached = get_api_response_cache(persisted_cache_key)
+        if cached:
+            return cached
     if "state" in globals() and cache_key in state.price_return_response_cache:
         return state.price_return_response_cache[cache_key]
 
@@ -1066,6 +1185,8 @@ def build_price_return_history(years: int = 3):
     }
     if "state" in globals():
         state.price_return_response_cache = {cache_key: result}
+    set_api_response_cache(persisted_cache_key, result)
+    set_api_response_cache(fixed_cache_key, result)
     return result
 
 
@@ -1114,7 +1235,13 @@ def get_ohlc_history_for_symbol(symbol: str, years: int = 3):
     }
 
 
-def build_notable_stocks_dashboard():
+def build_notable_stocks_dashboard(use_cache: bool = True):
+    cache_key = "notable_stocks_dashboard"
+    if use_cache:
+        cached = get_api_response_cache(cache_key)
+        if cached:
+            return cached
+
     conn = get_db_conn()
     cursor = conn.cursor()
     latest_date = get_latest_complete_market_date(cursor)
@@ -1219,13 +1346,15 @@ def build_notable_stocks_dashboard():
     ]
     niche = sorted(niche, key=lambda item: item["Score"], reverse=True)[:20]
 
-    return {
+    result = {
         "date": latest_date,
         "notable": notable,
         "niche": niche,
         "outflow": outflow,
         "source": "database"
     }
+    set_api_response_cache(cache_key, result)
+    return result
 
 
 @app.get("/api/sector-flow/results")
@@ -3020,6 +3149,12 @@ def run_sync_historical_worker():
             print("Finished historical liquidity aggregation!")
             print("Refreshing daily_price_return cache after historical sync...")
             rebuild_price_return_cache()
+            print("Refreshing API response cache after historical sync...")
+            API_RESPONSE_MEMORY_CACHE.clear()
+            build_price_return_history(3, use_cache=False)
+            build_sector_flow_history(3, use_cache=False)
+            build_sector_flow_snapshot(3, period="60d", use_cache=False)
+            build_notable_stocks_dashboard(use_cache=False)
             
     except Exception as e:
         print(f"Error in sync worker: {e}")
@@ -3986,6 +4121,7 @@ def export_vol_cap_history():
 def on_startup():
     init_db_liquidity()
     init_db_price_return_cache()
+    init_db_api_response_cache()
     start_background_crawler()
     start_price_return_cache_warmer()
     init_db_shares()

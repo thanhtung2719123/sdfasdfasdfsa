@@ -147,6 +147,13 @@ def translate_sql(sql: str) -> str:
             ON CONFLICT (symbol) DO UPDATE SET
                 outstanding_shares = EXCLUDED.outstanding_shares
         """
+    elif upper.startswith("INSERT OR REPLACE INTO API_RESPONSE_CACHE"):
+        sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO", 1)
+        sql += """
+            ON CONFLICT (cache_key) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                updated_at = EXCLUDED.updated_at
+        """
     elif upper.startswith("INSERT OR IGNORE INTO TICKER_SHARES"):
         sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO", 1)
         sql += " ON CONFLICT (symbol) DO NOTHING"
