@@ -1,11 +1,27 @@
 import os
 import sqlite3
+from urllib.parse import urlparse
 
 
 def normalize_database_url(url: str) -> str:
-    if url and url.startswith("postgres://"):
-        return "postgresql://" + url[len("postgres://"):]
-    return url
+    if not url:
+        return url
+
+    cleaned = url.strip().strip("\"'")
+    if ";" in cleaned:
+        cleaned = cleaned.split(";", 1)[0].strip()
+    if cleaned.startswith("DATABASE_URL="):
+        cleaned = cleaned.split("=", 1)[1].strip()
+    if cleaned.startswith("postgres://"):
+        cleaned = "postgresql://" + cleaned[len("postgres://"):]
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in {"postgresql", "postgres"} or not parsed.hostname or not parsed.path.strip("/"):
+        raise RuntimeError(
+            "DATABASE_URL is invalid. Set it to one Postgres URL only, for example: "
+            "postgresql://user:password@host:5432/database"
+        )
+    return cleaned
 
 
 def uses_postgres() -> bool:
