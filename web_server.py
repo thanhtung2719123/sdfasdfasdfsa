@@ -10,7 +10,6 @@ import time
 import queue
 import threading
 import io
-import sqlite3
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -22,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from db_adapter import connect_database
 
 # Ensure Vietnamese/UTF-8 print capability
 sys.stdout.reconfigure(encoding='utf-8')
@@ -46,14 +46,7 @@ for ind, symbols in list(VN302_INDUSTRIES.items()):
 SCAN_LIST = [s for s in SCAN_LIST if s not in DELISTED_OR_SUSPENDED]
 
 def get_db_conn():
-    conn = sqlite3.connect("market_cache.db", timeout=30.0)
-    # Kích hoạt chế độ WAL (Write-Ahead Logging) giúp nhiều luồng đọc/ghi đồng thời không bị khóa DB
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-    except Exception as e:
-        print(f"Warning: could not set PRAGMA: {e}")
-    return conn
+    return connect_database("market_cache.db")
 
 from vnstock import Company
 

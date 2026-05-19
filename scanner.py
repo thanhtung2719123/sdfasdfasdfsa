@@ -3,7 +3,25 @@ import numpy as np
 import time
 import queue
 import threading
-from PySide6.QtCore import QThread, Signal
+try:
+    from PySide6.QtCore import QThread, Signal
+except ImportError:
+    class QThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _NoopSignal:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def emit(self, *args, **kwargs):
+            pass
+
+        def connect(self, *args, **kwargs):
+            pass
+
+    def Signal(*args, **kwargs):
+        return _NoopSignal()
 
 VN302_INDUSTRIES = {
     'Họ Vingroup': [

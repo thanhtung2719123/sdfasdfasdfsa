@@ -1,9 +1,9 @@
-import sqlite3
 import threading
 import time
 import pandas as pd
 from datetime import datetime, timedelta
 from vnstock import Quote, Listing
+from db_adapter import connect_database
 
 class RateLimiter:
     def __init__(self, requests_per_minute=55):
@@ -29,13 +29,7 @@ class DataEngine:
         self._init_db()
 
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        try:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA synchronous=NORMAL;")
-        except Exception as e:
-            pass
-        return conn
+        return connect_database(self.db_path)
 
 
     def _init_db(self):
