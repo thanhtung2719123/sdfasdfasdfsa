@@ -19,6 +19,8 @@ document.addEventListener("DOMContentLoaded", () => {
         sectorFlowData: null,
         sectorFlowCache: {},
         sectorFlowHistory: null,
+        priceReturnHistory: null,
+        notableStocks: null,
         moneyFlowPeriod: "1d"
     };
 
@@ -38,6 +40,11 @@ document.addEventListener("DOMContentLoaded", () => {
         "tab-sector-share": { title: "Tỷ trọng Ngành", subtitle: "Tỷ lệ GTGD của từng ngành so với tổng GTGD toàn thị trường trong ngày" },
         "tab-sector-ma": { title: "So với MA20 / MA60", subtitle: "So sánh trạng thái hiện tại của dòng tiền ngành với trung bình 20 và 60 phiên" },
         "tab-money-flow": { title: "Dịch chuyển Dòng tiền", subtitle: "Nhìn nhanh dòng tiền đang tăng tỷ trọng ở đâu và rút bớt khỏi đâu" },
+        "tab-return-matrix": { title: "Return % 3 năm", subtitle: "Matrix tỷ suất sinh lời theo ngày của toàn bộ mã trong database" },
+        "tab-close-matrix": { title: "Giá Close 3 năm", subtitle: "Matrix giá đóng cửa của toàn bộ mã trong database" },
+        "tab-ohlc": { title: "Biểu đồ nến OHLC", subtitle: "Chọn bất kỳ mã nào để xem nến 3 năm gần nhất từ database" },
+        "tab-notable-stocks": { title: "Cổ phiếu nổi bật hôm nay", subtitle: "Kết hợp dòng tiền, return, Vol/MA20 và tín hiệu kỹ thuật để lọc mã đáng chú ý" },
+        "tab-export-all": { title: "Xuất Toàn Bộ", subtitle: "Gộp tất cả sheet Excel riêng lẻ của các tab vào một workbook" },
         "tab-market": { title: "Phân Tích Sức Mạnh Thị Trường", subtitle: "So sánh hiệu suất các ngành so với chỉ số VNINDEX" },
         "tab-scanner": { title: "Bộ Quét Kỹ Thuật VN302", subtitle: "Theo dõi thời gian thực tín hiệu xu hướng MA, RSI và MACD" },
         "tab-antigravity": { title: "Hệ Thống Antigravity Volatility", subtitle: "Phát hiện điểm xoay chiều cực đại khi khối lượng cạn kiệt" },
@@ -87,6 +94,14 @@ document.addEventListener("DOMContentLoaded", () => {
             loadSectorFlowData(panel ? panel.dataset.flowView : "gtgd");
         } else if (tabId === "tab-money-flow") {
             loadSectorFlowData("dashboard");
+        } else if (tabId === "tab-return-matrix") {
+            loadPriceMatrix("return");
+        } else if (tabId === "tab-close-matrix") {
+            loadPriceMatrix("close");
+        } else if (tabId === "tab-ohlc") {
+            initializeOhlcTab();
+        } else if (tabId === "tab-notable-stocks") {
+            loadNotableStocks();
         } else if (tabId === "tab-market") {
             fetchMarketData();
         } else if (tabId === "tab-liquidity") {
@@ -760,6 +775,265 @@ document.addEventListener("DOMContentLoaded", () => {
             showNotification("Đang xuất Excel tổng hợp nhiều sheet...", "emerald");
         });
     }
+
+    const priceMatrixConfig = {
+        close: { key: "Close", title: "Giá đóng cửa (VND)", summary: ["Average 20 phiên", "Average 60 phiên", "Average 250 phiên", "Min 52 tuần", "Max 52 tuần"], digits: 0, percent: false, heat: false },
+        return: { key: "ReturnPct", title: "Return theo ngày (%)", summary: ["Average 20 phiên", "Average 60 phiên", "Average 250 phiên", "5%", "50%", "95%"], digits: 2, percent: true, heat: true }
+    };
+
+    async function loadPriceReturnHistory(force = false) {
+        if (state.priceReturnHistory && !force) return state.priceReturnHistory;
+        const res = await fetch("/api/price-return/history?years=3");
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+        state.priceReturnHistory = data;
+        return data;
+    }
+
+    async function loadPriceMatrix(view = "return", force = false) {
+        const panel = document.querySelector(`.price-matrix-panel[data-price-view="${view}"]`);
+        const table = panel ? panel.querySelector(".price-matrix-table") : null;
+        if (table) table.innerHTML = `<tbody><tr><td class="text-center text-muted"><i class="fa-solid fa-circle-notch fa-spin"></i> Đang dựng matrix 3 năm từ database...</td></tr></tbody>`;
+        try {
+            await loadPriceReturnHistory(force);
+            renderPriceMatrix(view);
+        } catch (err) {
+            showNotification(`Lỗi dữ liệu ${view}: ${err.message}`, "red");
+        }
+    }
+
+    function renderPriceMatrix(view) {
+        const history = state.priceReturnHistory;
+        const config = priceMatrixConfig[view];
+        if (!history || !config) return;
+        const panel = document.querySelector(`.price-matrix-panel[data-price-view="${view}"]`);
+        const table = panel ? panel.querySelector(".price-matrix-table") : null;
+        const meta = panel ? panel.querySelector(".price-matrix-meta") : null;
+        if (!table) return;
+        const tickers = history.tickers || [];
+        const valuesByTicker = {};
+        tickers.forEach(ticker => {
+            valuesByTicker[ticker] = (history.rows || [])
+                .map(day => day.values?.[ticker]?.[config.key])
+                .filter(value => value !== null && value !== undefined && !Number.isNaN(Number(value)))
+                .map(Number);
+        });
+        const summaryRows = config.summary.map(label => {
+            const statKey = normalizeStatLabel(label);
+            return `<tr class="sector-matrix-summary-row"><th>${label}</th>${tickers.map(ticker => `<td>${formatMatrixValue(history.stats?.[view]?.[statKey]?.[ticker], config)}</td>`).join("")}</tr>`;
+        }).join("");
+        table.classList.add("sector-matrix-table");
+        table.innerHTML = `<tbody>${summaryRows}<tr class="sector-matrix-spacer"><td colspan="${tickers.length + 1}"></td></tr><tr class="sector-matrix-title"><th colspan="${tickers.length + 1}">${config.title}</th></tr><tr class="sector-matrix-header"><th>Dates</th>${tickers.map(ticker => `<th>${ticker}</th>`).join("")}</tr>${(history.rows || []).map(day => `<tr><th>${day.Date}</th>${tickers.map(ticker => { const value = day.values?.[ticker]?.[config.key]; const cls = config.heat ? heatClass(value, valuesByTicker[ticker]) : ""; return `<td class="${cls}">${formatMatrixValue(value, config)}</td>`; }).join("")}</tr>`).join("")}</tbody>`;
+        if (meta) meta.textContent = `Nguồn: database | ${history.start_date} đến ${history.end_date} | ${history.rows.length} phiên | ${tickers.length} mã`;
+    }
+
+    document.querySelectorAll(".btn-load-price-matrix").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const panel = btn.closest(".price-matrix-panel");
+            loadPriceMatrix(panel ? panel.dataset.priceView : "return", true);
+        });
+    });
+
+    document.querySelectorAll(".btn-export-price-matrix").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const panel = btn.closest(".price-matrix-panel");
+            const view = panel ? panel.dataset.priceView : "return";
+            window.location.href = view === "close" ? "/api/export/close-matrix?years=3" : "/api/export/return-matrix?years=3";
+            showNotification(view === "close" ? "Đang xuất Excel giá Close 3 năm..." : "Đang xuất Excel Return % 3 năm...", "emerald");
+        });
+    });
+
+    let fullExportPollTimer = null;
+
+    function updateFullExportProgress(status) {
+        const panel = document.getElementById("full-export-progress-panel");
+        const bar = document.getElementById("full-export-progress-bar");
+        const label = document.getElementById("full-export-progress-label");
+        const step = document.getElementById("full-export-step");
+        const download = document.getElementById("full-export-download");
+        if (!panel || !bar || !label || !step || !download) return;
+
+        const progress = Math.max(0, Math.min(100, Number(status.progress || 0)));
+        panel.style.display = "block";
+        bar.style.width = `${progress}%`;
+        label.textContent = `${progress.toFixed(0)}%`;
+        step.textContent = status.error || status.step || "Đang xử lý...";
+        download.style.display = status.ready ? "inline-flex" : "none";
+        if (status.ready) {
+            download.href = `/api/export/full-workbook/download?t=${Date.now()}`;
+        }
+    }
+
+    async function pollFullExportStatus() {
+        try {
+            const res = await fetch("/api/export/full-workbook/status");
+            const status = await res.json();
+            updateFullExportProgress(status);
+            if (status.error) {
+                clearInterval(fullExportPollTimer);
+                fullExportPollTimer = null;
+                showNotification(`Lỗi xuất tổng hợp: ${status.error}`, "red");
+            } else if (status.ready) {
+                clearInterval(fullExportPollTimer);
+                fullExportPollTimer = null;
+                showNotification("File tổng hợp đã sẵn sàng tải xuống.", "emerald");
+                if (!window.__fullExportAutoDownloaded) {
+                    window.__fullExportAutoDownloaded = true;
+                    window.location.href = `/api/export/full-workbook/download?t=${Date.now()}`;
+                }
+            }
+        } catch (err) {
+            clearInterval(fullExportPollTimer);
+            fullExportPollTimer = null;
+            showNotification(`Không đọc được tiến độ export: ${err.message}`, "red");
+        }
+    }
+
+    document.getElementById("btn-export-full-workbook")?.addEventListener("click", async () => {
+        const btn = document.getElementById("btn-export-full-workbook");
+        const download = document.getElementById("full-export-download");
+        if (download) download.style.display = "none";
+        window.__fullExportAutoDownloaded = false;
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch("/api/export/full-workbook/start?years=3", { method: "POST" });
+            const data = await res.json();
+            if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+            showNotification("Đã bắt đầu gộp workbook, theo dõi thanh tiến độ bên dưới.", "emerald");
+            await pollFullExportStatus();
+            if (fullExportPollTimer) clearInterval(fullExportPollTimer);
+            fullExportPollTimer = setInterval(pollFullExportStatus, 2000);
+        } catch (err) {
+            showNotification(`Không khởi động được export tổng hợp: ${err.message}`, "red");
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    });
+
+    async function initializeOhlcTab() {
+        const select = document.getElementById("ohlc-ticker-select");
+        if (!select) return;
+        if (select.options.length === 0) {
+            await loadTickersDropdown();
+            select.innerHTML = "";
+            (state.tickers.length ? state.tickers : ["HPG", "VCI", "FPT"]).forEach(symbol => {
+                const opt = document.createElement("option");
+                opt.value = symbol;
+                opt.textContent = symbol;
+                select.appendChild(opt);
+            });
+            if ([...select.options].some(opt => opt.value === "HPG")) select.value = "HPG";
+        }
+        loadOhlcChart(select.value);
+    }
+
+    async function loadOhlcChart(symbol) {
+        if (!symbol) return;
+        const meta = document.getElementById("ohlc-meta");
+        if (meta) meta.textContent = "Đang tải OHLC 3 năm từ database...";
+        try {
+            const res = await fetch(`/api/ohlc/${encodeURIComponent(symbol)}?years=3`);
+            const data = await res.json();
+            if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+            drawOhlcCanvas(data.history || []);
+            renderOhlcSummary(data);
+            if (meta) meta.textContent = `${data.symbol} | ${data.industry} | ${data.start_date} đến ${data.end_date} | ${(data.history || []).length} nến`;
+        } catch (err) {
+            showNotification(`Lỗi OHLC: ${err.message}`, "red");
+        }
+    }
+
+    function renderOhlcSummary(data) {
+        const wrap = document.getElementById("ohlc-summary");
+        const history = data.history || [];
+        if (!wrap || history.length === 0) return;
+        const last = history[history.length - 1];
+        const prev = history[history.length - 2] || last;
+        const ret = prev.close ? (last.close / prev.close - 1) * 100 : 0;
+        wrap.innerHTML = `<div><span>Mã</span><strong>${data.symbol}</strong></div><div><span>Close</span><strong>${formatNumber(last.close, 0)}</strong></div><div><span>Return 1D</span><strong class="${ret >= 0 ? "text-green" : "text-red"}">${formatSigned(ret, 2)}%</strong></div><div><span>Volume</span><strong>${formatNumber(last.volume, 0)}</strong></div>`;
+    }
+
+    function drawOhlcCanvas(history) {
+        const canvas = document.getElementById("ohlc-canvas");
+        if (!canvas || history.length === 0) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(900, rect.width) * dpr;
+        canvas.height = 480 * dpr;
+        canvas.style.width = "100%";
+        canvas.style.height = "480px";
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const width = canvas.width / dpr;
+        const height = canvas.height / dpr;
+        ctx.clearRect(0, 0, width, height);
+        const pad = { left: 62, right: 18, top: 18, bottom: 42 };
+        const plotW = width - pad.left - pad.right;
+        const plotH = height - pad.top - pad.bottom;
+        const maxP = Math.max(...history.map(d => d.high));
+        const minP = Math.min(...history.map(d => d.low));
+        const y = price => pad.top + (maxP - price) / (maxP - minP || 1) * plotH;
+        const candleW = Math.max(2, plotW / history.length * 0.62);
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = "12px Inter, sans-serif";
+        for (let i = 0; i <= 5; i++) {
+            const py = pad.top + (plotH / 5) * i;
+            const price = maxP - ((maxP - minP) / 5) * i;
+            ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(width - pad.right, py); ctx.stroke();
+            ctx.fillText(formatNumber(price, 0), 8, py + 4);
+        }
+        history.forEach((d, idx) => {
+            const x = pad.left + (idx + 0.5) * (plotW / history.length);
+            const color = d.close >= d.open ? "#26a69a" : "#ef5350";
+            ctx.strokeStyle = color; ctx.fillStyle = color;
+            ctx.beginPath(); ctx.moveTo(x, y(d.high)); ctx.lineTo(x, y(d.low)); ctx.stroke();
+            const top = y(Math.max(d.open, d.close));
+            const bot = y(Math.min(d.open, d.close));
+            ctx.fillRect(x - candleW / 2, top, candleW, Math.max(1, bot - top));
+        });
+        const step = Math.max(1, Math.floor(history.length / 6));
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        for (let i = 0; i < history.length; i += step) {
+            const x = pad.left + (i + 0.5) * (plotW / history.length);
+            ctx.fillText(history[i].date.slice(2), x - 24, height - 14);
+        }
+    }
+
+    document.getElementById("btn-load-ohlc")?.addEventListener("click", () => {
+        const select = document.getElementById("ohlc-ticker-select");
+        loadOhlcChart(select ? select.value : "HPG");
+    });
+    document.getElementById("ohlc-ticker-select")?.addEventListener("change", e => loadOhlcChart(e.target.value));
+
+    async function loadNotableStocks() {
+        const meta = document.getElementById("notable-stocks-meta");
+        if (meta) meta.textContent = "Đang lọc cổ phiếu nổi bật từ database...";
+        try {
+            const res = await fetch("/api/notable-stocks");
+            const data = await res.json();
+            if (!res.ok || data.error || data.detail) throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+            state.notableStocks = data;
+            renderStockSignalList("notable-stock-list", data.notable || [], "notable");
+            renderStockSignalList("niche-stock-list", data.niche || [], "niche");
+            renderStockSignalList("outflow-stock-list", data.outflow || [], "outflow");
+            if (meta) meta.textContent = `Nguồn: database | Ngày ${data.date} | Refresh tự động lúc 17:00 GMT+7 khi server/app đang mở.`;
+        } catch (err) {
+            showNotification(`Lỗi dashboard cổ phiếu: ${err.message}`, "red");
+        }
+    }
+
+    function renderStockSignalList(containerId, rows, mode) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.innerHTML = rows.slice(0, 12).map(item => {
+            const isOut = mode === "outflow";
+            const cls = isOut ? "text-red" : "text-green";
+            return `<div class="stock-signal-card"><div class="stock-signal-top"><strong>${item.Ticker}</strong><span class="${cls}">${formatSigned(item.Return1D, 2)}%</span></div><div class="stock-signal-sub">${item.Industry} | Close ${formatNumber(item.Close, 0)} | GTGD ${formatNumber(item.LiquidityBillion, 1)} tỷ</div><div class="stock-signal-sub">Vol/MA20 ${formatNumber(item.VolRatio, 2)}x | RSI ${formatNumber(item.RSI14, 1)} | Score ${formatNumber(item.Score, 1)}</div><div class="stock-reasons">${(item.Reasons || []).slice(0, 4).map(r => `<span>${r}</span>`).join("")}</div></div>`;
+        }).join("");
+    }
+
+    document.getElementById("btn-load-notable-stocks")?.addEventListener("click", loadNotableStocks);
 
     // --- 4. MARKET ANALYSIS LOGIC ---
     async function fetchMarketData() {

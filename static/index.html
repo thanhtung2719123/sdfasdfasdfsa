@@ -54,6 +54,26 @@
                     <i class="fa-solid fa-right-left nav-icon"></i>
                     <span>Dịch chuyển dòng tiền</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="tab-return-matrix">
+                    <i class="fa-solid fa-arrow-trend-up nav-icon"></i>
+                    <span>Return %</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-close-matrix">
+                    <i class="fa-solid fa-tag nav-icon"></i>
+                    <span>Giá Close</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-ohlc">
+                    <i class="fa-solid fa-chart-column nav-icon"></i>
+                    <span>Nến OHLC 3 năm</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-notable-stocks">
+                    <i class="fa-solid fa-star nav-icon"></i>
+                    <span>Cổ phiếu nổi bật</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="tab-export-all">
+                    <i class="fa-solid fa-file-export nav-icon"></i>
+                    <span>Xuất toàn bộ</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="tab-market">
                     <i class="fa-solid fa-chart-pie nav-icon"></i>
                     <span>Phân Tích Thị Trường</span>
@@ -249,6 +269,101 @@
                         </div>
                     </div>
                     <p id="money-flow-meta" class="text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-return-matrix" class="tab-panel price-matrix-panel" data-price-view="return">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Return % theo ngày</h2>
+                        <button class="btn btn-cyan btn-load-price-matrix"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm</button>
+                        <button class="btn btn-emerald btn-export-price-matrix"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table price-matrix-table"></table>
+                    </div>
+                    <p class="price-matrix-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-close-matrix" class="tab-panel price-matrix-panel" data-price-view="close">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Giá Close 3 năm</h2>
+                        <button class="btn btn-cyan btn-load-price-matrix"><i class="fa-solid fa-database"></i> Nạp dữ liệu 3 năm</button>
+                        <button class="btn btn-emerald btn-export-price-matrix"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table price-matrix-table"></table>
+                    </div>
+                    <p class="price-matrix-meta text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-ohlc" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Biểu đồ nến OHLC 3 năm</h2>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <select id="ohlc-ticker-select" class="premium-select"></select>
+                            <button id="btn-load-ohlc" class="btn btn-cyan"><i class="fa-solid fa-chart-line"></i> Vẽ nến</button>
+                        </div>
+                    </div>
+                    <div class="ohlc-summary" id="ohlc-summary"></div>
+                    <div class="ohlc-canvas-wrap">
+                        <canvas id="ohlc-canvas"></canvas>
+                    </div>
+                    <p class="text-muted" id="ohlc-meta" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-notable-stocks" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Dashboard cổ phiếu nổi bật hôm nay</h2>
+                        <button id="btn-load-notable-stocks" class="btn btn-cyan"><i class="fa-solid fa-arrows-rotate"></i> Cập nhật dashboard</button>
+                    </div>
+                    <div class="notable-grid">
+                        <div>
+                            <h3 class="flow-title">Cổ đáng chú ý</h3>
+                            <div id="notable-stock-list" class="stock-signal-list"></div>
+                        </div>
+                        <div>
+                            <h3 class="flow-title">Niche ít người để ý</h3>
+                            <div id="niche-stock-list" class="stock-signal-list"></div>
+                        </div>
+                        <div>
+                            <h3 class="flow-title">Bị rút dòng tiền mạnh</h3>
+                            <div id="outflow-stock-list" class="stock-signal-list"></div>
+                        </div>
+                    </div>
+                    <p id="notable-stocks-meta" class="text-muted" style="margin-top: 10px;"></p>
+                </div>
+            </section>
+
+            <section id="tab-export-all" class="tab-panel">
+                <div class="panel-card glass">
+                    <div class="card-header">
+                        <h2>Xuất toàn bộ workbook</h2>
+                        <button id="btn-export-full-workbook" class="btn btn-emerald"><i class="fa-solid fa-file-excel"></i> Xuất toàn bộ Excel</button>
+                    </div>
+                    <div id="full-export-progress-panel" class="export-progress-panel" style="display: none;">
+                        <div class="export-progress-top">
+                            <strong id="full-export-progress-label">0%</strong>
+                            <span id="full-export-step">Chuẩn bị xuất file...</span>
+                        </div>
+                        <div class="export-progress-track">
+                            <div id="full-export-progress-bar" class="export-progress-bar" style="width: 0%;"></div>
+                        </div>
+                        <a id="full-export-download" class="btn btn-cyan" href="/api/export/full-workbook/download" style="display: none; margin-top: 12px;"><i class="fa-solid fa-download"></i> Tải file tổng hợp</a>
+                    </div>
+                    <div class="flow-summary-strip">
+                        <div><span>Close</span><strong>Giá đóng cửa 3 năm</strong></div>
+                        <div><span>Return</span><strong>Return ngày 3 năm</strong></div>
+                        <div><span>Ngành</span><strong>GTGD, vốn hóa, tỷ trọng</strong></div>
+                        <div><span>Cổ phiếu</span><strong>Thanh khoản, vốn hóa, Vol/Cap</strong></div>
+                    </div>
+                    <p class="text-muted">Workbook này gom các sheet xuất riêng của từng tab vào một file, theo layout ngành - mã - PX_LAST giống file mẫu.</p>
                 </div>
             </section>
 

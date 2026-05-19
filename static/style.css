@@ -878,6 +878,130 @@ body {
     margin-top: 22px;
 }
 
+.ohlc-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.ohlc-summary div,
+.stock-signal-card {
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    padding: 12px;
+}
+
+.ohlc-summary span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.ohlc-summary strong {
+    color: #ffffff;
+    font-size: 15px;
+}
+
+.ohlc-canvas-wrap {
+    height: 480px;
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.18);
+    padding: 8px;
+    overflow: hidden;
+}
+
+.notable-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.stock-signal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.stock-signal-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.stock-signal-top strong {
+    color: #ffffff;
+    font-size: 18px;
+}
+
+.stock-signal-sub {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.stock-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+}
+
+.stock-reasons span {
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: rgba(0, 229, 255, 0.10);
+    color: var(--accent-cyan);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.export-progress-panel {
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    padding: 14px;
+    margin: 0 0 18px;
+}
+
+.export-progress-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.export-progress-top strong {
+    color: var(--accent-cyan);
+    font-size: 20px;
+}
+
+.export-progress-top span {
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: right;
+}
+
+.export-progress-track {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.export-progress-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-cyan), var(--accent-emerald));
+    transition: width 0.35s ease;
+}
+
 /* Alert Notification Panel */
 .watchlist-info-box {
     padding: 16px;

@@ -11,10 +11,6 @@ import queue
 import threading
 import io
 import sqlite3
-try:
-    import libsql
-except ImportError:
-    import sqlite3 as libsql
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -50,12 +46,6 @@ for ind, symbols in list(VN302_INDUSTRIES.items()):
 SCAN_LIST = [s for s in SCAN_LIST if s not in DELISTED_OR_SUSPENDED]
 
 def get_db_conn():
-    db_url = os.getenv("TURSO_URL")
-    db_token = os.getenv("TURSO_AUTH_TOKEN")
-    
-    if db_url and db_token:
-        return libsql.connect(db_url, auth_token=db_token)
-        
     conn = sqlite3.connect("market_cache.db", timeout=30.0)
     # Kích hoạt chế độ WAL (Write-Ahead Logging) giúp nhiều luồng đọc/ghi đồng thời không bị khóa DB
     try:
@@ -68,8 +58,7 @@ def get_db_conn():
 from vnstock import Company
 
 CACHE_DIR = "data_cache"
-if os.getenv("VERCEL") != "1":
-    os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Add a set for dead symbols to prevent repeated API calls
 
@@ -145,8 +134,21 @@ class AppState:
             "progress": 0.0,
             "current": 0,
             "total": 0,
-            "error": None
+            "error": None,
+            "last_auto_refresh_date": None,
+            "auto_refresh_running": False
         }
+        self.full_export_state = {
+            "running": False,
+            "progress": 0.0,
+            "step": "ChÆ°a cháº¡y",
+            "error": None,
+            "file_path": None,
+            "file_name": None,
+            "started_at": None,
+            "finished_at": None
+        }
+        self.price_return_response_cache = {}
         
         self.cap_range_lock = threading.Lock()
         self.cap_range_state = {
@@ -270,6 +272,39 @@ def run_rsi_backtest(params: BacktestParams):
         return {"error": str(e)}
 
 # --- 2. MULTI-THREADED SCANNER BACKGROUND TASK ---
+def get_scan_history_from_db(symbol: str, start_date: str) -> pd.DataFrame:
+    """Read scanner input from local cache first; fallback to API only when cache is missing."""
+    try:
+        with state.engine.db_lock:
+            conn = state.engine._get_conn()
+            df = pd.read_sql_query(
+                """
+                SELECT time, open, high, low, close, volume
+                FROM historical_prices
+                WHERE symbol = ? AND time >= ?
+                ORDER BY time ASC
+                """,
+                conn,
+                params=(symbol.upper(), start_date),
+            )
+            conn.close()
+
+        if not df.empty:
+            df["time"] = pd.to_datetime(df["time"], errors="coerce")
+            df = df.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+            if len(df) >= 10:
+                return df
+    except Exception as e:
+        print(f"Error reading scanner cache for {symbol}: {e}")
+
+    df = state.engine.get_history(symbol, start=start_date)
+    if not df.empty:
+        df = df.copy()
+        df["time"] = pd.to_datetime(df["time"], errors="coerce")
+        df = df.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+    return df
+
+
 def run_scan_worker():
     with state.scan_lock:
         state.scan_state["running"] = True
@@ -281,7 +316,7 @@ def run_scan_worker():
         
     total = len(SCAN_LIST)
     fetch_start_date = '2025-01-01'
-    return_ref_date = '2026-03-23'
+    return_ref_date = pd.to_datetime('2026-03-23')
     
     q = queue.Queue()
     for symbol in SCAN_LIST:
@@ -301,7 +336,7 @@ def run_scan_worker():
                 break
                 
             try:
-                df_long = state.engine.get_history(symbol, start=fetch_start_date)
+                df_long = get_scan_history_from_db(symbol, fetch_start_date)
                 
                 if df_long.empty or len(df_long) < 10:
                     q.task_done()
@@ -482,6 +517,124 @@ def calculate_percentile(values, current_value):
     return round((sum(v <= current_value for v in clean_values) / len(clean_values)) * 100.0, 1)
 
 
+def get_latest_complete_market_date(cursor, min_count: int = 100):
+    cursor.execute("""
+        SELECT time, COUNT(DISTINCT symbol) AS ticker_count
+        FROM historical_prices
+        WHERE symbol IN ({})
+        GROUP BY time
+        ORDER BY time DESC
+    """.format(",".join(["?"] * len(VN302))), VN302)
+    for dt, ticker_count in cursor.fetchall():
+        if ticker_count >= min_count:
+            return dt
+    cursor.execute("SELECT MAX(time) FROM historical_prices")
+    return cursor.fetchone()[0]
+
+
+def init_db_price_return_cache():
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_price_return (
+                date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                industry TEXT,
+                close_vnd REAL,
+                return_pct REAL,
+                PRIMARY KEY (date, symbol)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_price_return_date ON daily_price_return(date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_price_return_symbol ON daily_price_return(symbol)")
+        conn.commit()
+        conn.close()
+        print("Database daily_price_return cache table verified.")
+    except Exception as e:
+        print(f"Error initializing daily_price_return cache table: {e}")
+
+
+def rebuild_price_return_cache():
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT symbol, time, close
+        FROM historical_prices
+        WHERE symbol IN ({})
+        ORDER BY symbol, time
+    """.format(",".join(["?"] * len(VN302))), VN302)
+    rows = cursor.fetchall()
+
+    if not rows:
+        conn.close()
+        return 0
+
+    df = pd.DataFrame(rows, columns=["Ticker", "Date", "Close"])
+    df["CloseVND"] = df["Close"].apply(normalize_price)
+    df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+    df["ReturnPct"] = df.groupby("Ticker")["CloseVND"].pct_change() * 100.0
+    insert_rows = []
+    for _, row in df.iterrows():
+        if pd.isna(row["CloseVND"]):
+            continue
+        insert_rows.append((
+            row["Date"],
+            row["Ticker"],
+            get_symbol_industry(row["Ticker"]),
+            round(float(row["CloseVND"]), 4),
+            round(float(row["ReturnPct"]), 6) if pd.notna(row["ReturnPct"]) else None
+        ))
+
+    cursor.execute("DELETE FROM daily_price_return")
+    cursor.executemany("""
+        INSERT OR REPLACE INTO daily_price_return (date, symbol, industry, close_vnd, return_pct)
+        VALUES (?, ?, ?, ?, ?)
+    """, insert_rows)
+    conn.commit()
+    conn.close()
+    if "state" in globals():
+        state.price_return_response_cache = {}
+    print(f"Rebuilt daily_price_return cache: {len(insert_rows)} rows.")
+    return len(insert_rows)
+
+
+def ensure_price_return_cache():
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    max_date_str = get_latest_complete_market_date(cursor)
+    if not max_date_str:
+        conn.close()
+        return {"error": "Database chÆ°a cÃ³ dá»¯ liá»‡u giÃ¡."}
+
+    cursor.execute("SELECT COUNT(DISTINCT symbol) FROM historical_prices WHERE time = ? AND symbol IN ({})".format(",".join(["?"] * len(VN302))), [max_date_str] + VN302)
+    historical_count = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(DISTINCT symbol) FROM daily_price_return WHERE date = ? AND symbol IN ({})".format(",".join(["?"] * len(VN302))), [max_date_str] + VN302)
+    cache_count = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(*) FROM daily_price_return")
+    cache_rows = cursor.fetchone()[0] or 0
+    conn.close()
+
+    if cache_rows == 0 or cache_count < max(1, int(historical_count * 0.95)):
+        rebuilt_rows = rebuild_price_return_cache()
+        return {"rebuilt": True, "rows": rebuilt_rows, "max_date": max_date_str}
+    return {"rebuilt": False, "rows": cache_rows, "max_date": max_date_str}
+
+
+def warm_price_return_response_cache():
+    try:
+        print("Warming price/return response cache...")
+        build_price_return_history(3)
+        print("Price/return response cache is ready.")
+    except Exception as e:
+        print(f"Price/return cache warmup failed: {e}")
+
+
+def start_price_return_cache_warmer():
+    t = threading.Thread(target=warm_price_return_response_cache, daemon=True)
+    t.start()
+
+
 SECTOR_FLOW_PERIODS = {
     "1d": {"sessions": 1, "label": "1 ngÃ y"},
     "3d": {"sessions": 3, "label": "3 ngÃ y"},
@@ -499,8 +652,7 @@ def build_sector_flow_snapshot(years: int = 3, period: str = "60d"):
     lookback_sessions = period_config["sessions"]
     conn = get_db_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT MAX(time) FROM historical_prices")
-    max_date_str = cursor.fetchone()[0]
+    max_date_str = get_latest_complete_market_date(cursor)
     if not max_date_str:
         conn.close()
         return {"error": "Database chưa có dữ liệu giá. Bấm Đồng bộ Data 3 năm trước."}
@@ -704,8 +856,7 @@ def build_sector_flow_snapshot(years: int = 3, period: str = "60d"):
 def build_sector_flow_history(years: int = 3):
     conn = get_db_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT MAX(time) FROM historical_prices")
-    max_date_str = cursor.fetchone()[0]
+    max_date_str = get_latest_complete_market_date(cursor)
     if not max_date_str:
         conn.close()
         return {"error": "Database chÆ°a cÃ³ dá»¯ liá»‡u giÃ¡."}
@@ -825,6 +976,265 @@ def build_sector_flow_history(years: int = 3):
     }
 
 
+def build_price_return_history(years: int = 3):
+    cache_status = ensure_price_return_cache()
+    if cache_status.get("error"):
+        return {"error": cache_status["error"]}
+    cache_key = f"{years}:{cache_status.get('max_date')}:{cache_status.get('rows')}"
+    if "state" in globals() and cache_key in state.price_return_response_cache:
+        return state.price_return_response_cache[cache_key]
+
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    max_date_str = cache_status["max_date"]
+    if not max_date_str:
+        conn.close()
+        return {"error": "Database chÆ°a cÃ³ dá»¯ liá»‡u giÃ¡."}
+
+    max_dt = datetime.strptime(max_date_str, "%Y-%m-%d")
+    start_date = (max_dt - pd.DateOffset(years=years)).strftime("%Y-%m-%d")
+    cursor.execute("""
+        SELECT symbol, date, close_vnd, return_pct
+        FROM daily_price_return
+        WHERE date >= ? AND date <= ?
+    """, (start_date, max_date_str))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"error": "KhÃ´ng cÃ³ dá»¯ liá»‡u close trong database."}
+
+    df = pd.DataFrame(rows, columns=["Ticker", "Date", "CloseVND", "ReturnPct"])
+    df = df[df["Ticker"].isin(VN302)].copy()
+    df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+
+    tickers = [symbol for symbol in VN302 if symbol in set(df["Ticker"])]
+    close_pivot = df.pivot(index="Date", columns="Ticker", values="CloseVND")
+    return_pivot = df.pivot(index="Date", columns="Ticker", values="ReturnPct")
+    dates_desc = sorted(close_pivot.index.tolist(), reverse=True)
+    rows_out = []
+    for dt in dates_desc:
+        values = {}
+        close_row = close_pivot.loc[dt]
+        return_row = return_pivot.loc[dt] if dt in return_pivot.index else None
+        for symbol in tickers:
+            close_val = close_row.get(symbol)
+            if pd.notna(close_val):
+                return_val = return_row.get(symbol) if return_row is not None and symbol in return_row.index else None
+                values[symbol] = {
+                    "Close": round(float(close_val), 2),
+                    "ReturnPct": round(float(return_val), 4) if pd.notna(return_val) else None,
+                }
+            else:
+                values[symbol] = {}
+        rows_out.append({"Date": dt, "values": values})
+
+    def metric_stats(metric_col):
+        stat_rows = {
+            "Average 20 phiÃªn": {},
+            "Average 60 phiÃªn": {},
+            "Average 250 phiÃªn": {},
+            "Min 52 tuáº§n": {},
+            "Max 52 tuáº§n": {},
+            "5%": {},
+            "50%": {},
+            "95%": {},
+        }
+        for symbol in tickers:
+            source_pivot = close_pivot if metric_col == "CloseVND" else return_pivot
+            if symbol not in source_pivot.columns:
+                continue
+            s = source_pivot[symbol].dropna()
+            if s.empty:
+                continue
+            stat_rows["Average 20 phiÃªn"][symbol] = round(float(s.tail(20).mean()), 4)
+            stat_rows["Average 60 phiÃªn"][symbol] = round(float(s.tail(60).mean()), 4)
+            stat_rows["Average 250 phiÃªn"][symbol] = round(float(s.tail(250).mean()), 4)
+            last_252 = s.tail(252)
+            stat_rows["Min 52 tuáº§n"][symbol] = round(float(last_252.min()), 4)
+            stat_rows["Max 52 tuáº§n"][symbol] = round(float(last_252.max()), 4)
+            stat_rows["5%"][symbol] = round(float(s.quantile(0.05)), 4)
+            stat_rows["50%"][symbol] = round(float(s.quantile(0.50)), 4)
+            stat_rows["95%"][symbol] = round(float(s.quantile(0.95)), 4)
+        return stat_rows
+
+    result = {
+        "start_date": start_date,
+        "end_date": max_date_str,
+        "years": years,
+        "tickers": tickers,
+        "rows": rows_out,
+        "stats": {
+            "close": metric_stats("CloseVND"),
+            "return": metric_stats("ReturnPct"),
+        },
+        "source": "daily_price_return_cache",
+        "cache": cache_status
+    }
+    if "state" in globals():
+        state.price_return_response_cache = {cache_key: result}
+    return result
+
+
+def get_ohlc_history_for_symbol(symbol: str, years: int = 3):
+    symbol = symbol.upper()
+    if symbol not in VN302:
+        return {"error": "MÃ£ khÃ´ng náº±m trong danh sÃ¡ch VN302."}
+
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT MAX(time) FROM historical_prices WHERE symbol = ?", (symbol,))
+    max_date_str = cursor.fetchone()[0]
+    if not max_date_str:
+        conn.close()
+        return {"error": "Database chÆ°a cÃ³ dá»¯ liá»‡u cho mÃ£ nÃ y."}
+    max_dt = datetime.strptime(max_date_str, "%Y-%m-%d")
+    start_date = (max_dt - pd.DateOffset(years=years)).strftime("%Y-%m-%d")
+    cursor.execute("""
+        SELECT time, open, high, low, close, volume
+        FROM historical_prices
+        WHERE symbol = ? AND time >= ? AND time <= ?
+        ORDER BY time ASC
+    """, (symbol, start_date, max_date_str))
+    rows = cursor.fetchall()
+    conn.close()
+
+    history = []
+    for dt, open_p, high_p, low_p, close_p, volume in rows:
+        if open_p is None or high_p is None or low_p is None or close_p is None:
+            continue
+        history.append({
+            "date": dt,
+            "open": normalize_price(open_p),
+            "high": normalize_price(high_p),
+            "low": normalize_price(low_p),
+            "close": normalize_price(close_p),
+            "volume": int(volume or 0),
+        })
+
+    return {
+        "symbol": symbol,
+        "industry": get_symbol_industry(symbol),
+        "start_date": start_date,
+        "end_date": max_date_str,
+        "history": history
+    }
+
+
+def build_notable_stocks_dashboard():
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    latest_date = get_latest_complete_market_date(cursor)
+    if not latest_date:
+        conn.close()
+        return {"error": "Database chÆ°a cÃ³ dá»¯ liá»‡u giÃ¡."}
+    cursor.execute("SELECT symbol, outstanding_shares FROM ticker_shares")
+    shares_map = {row[0]: row[1] for row in cursor.fetchall()}
+    start_dt = (datetime.strptime(latest_date, "%Y-%m-%d") - pd.DateOffset(years=1)).strftime("%Y-%m-%d")
+    cursor.execute("""
+        SELECT symbol, time, open, high, low, close, volume
+        FROM historical_prices
+        WHERE time >= ? AND time <= ?
+    """, (start_dt, latest_date))
+    rows = cursor.fetchall()
+    conn.close()
+
+    df = pd.DataFrame(rows, columns=["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"])
+    df = df[df["Ticker"].isin(VN302)].copy()
+    if df.empty:
+        return {"error": "KhÃ´ng cÃ³ dá»¯ liá»‡u dashboard."}
+    for col in ["Open", "High", "Low", "Close"]:
+        df[col] = df[col].apply(normalize_price)
+    df["Volume"] = df["Volume"].fillna(0).astype(float)
+    df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+    df["Return1D"] = df.groupby("Ticker")["Close"].pct_change() * 100.0
+    df["Return5D"] = df.groupby("Ticker")["Close"].pct_change(5) * 100.0
+    df["MA20"] = df.groupby("Ticker")["Close"].transform(lambda s: s.rolling(20, min_periods=1).mean())
+    df["MA50"] = df.groupby("Ticker")["Close"].transform(lambda s: s.rolling(50, min_periods=1).mean())
+    df["VolMA20"] = df.groupby("Ticker")["Volume"].transform(lambda s: s.rolling(20, min_periods=1).mean())
+    df["High20"] = df.groupby("Ticker")["High"].transform(lambda s: s.rolling(20, min_periods=1).max())
+    df["High52W"] = df.groupby("Ticker")["High"].transform(lambda s: s.rolling(252, min_periods=1).max())
+    delta = df.groupby("Ticker")["Close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.groupby(df["Ticker"]).transform(lambda s: s.rolling(14, min_periods=1).mean())
+    avg_loss = loss.groupby(df["Ticker"]).transform(lambda s: s.rolling(14, min_periods=1).mean())
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df["RSI14"] = 100 - (100 / (1 + rs))
+    df["LiquidityBillion"] = df["Close"] * df["Volume"] / 1_000_000_000
+
+    latest = df[df["Date"] == latest_date].copy()
+    records = []
+    def nz(value, default=0.0):
+        return float(value) if value is not None and pd.notna(value) else default
+
+    for _, row in latest.iterrows():
+        shares = get_outstanding_shares(row["Ticker"], shares_map)
+        market_cap_billion = (float(row["Close"]) * shares / 1_000_000_000) if shares else None
+        vol_ratio = float(row["Volume"] / row["VolMA20"]) if row["VolMA20"] and row["VolMA20"] > 0 else None
+        near_high = float(row["Close"] / row["High52W"] * 100.0) if row["High52W"] and row["High52W"] > 0 else None
+        breakout = bool(row["Close"] >= row["High20"] * 0.995) if row["High20"] and row["High20"] > 0 else False
+        tech_score = 0
+        reasons = []
+        if row["Close"] > row["MA20"]:
+            tech_score += 1
+            reasons.append("trÃªn MA20")
+        if row["Close"] > row["MA50"]:
+            tech_score += 1
+            reasons.append("trÃªn MA50")
+        if breakout:
+            tech_score += 1
+            reasons.append("gáº§n breakout 20 phiÃªn")
+        if vol_ratio and vol_ratio >= 1.5:
+            reasons.append("vol báº­t so MA20")
+        if near_high and near_high >= 90:
+            reasons.append("gáº§n Ä‘á»‰nh 52w")
+
+        score = (
+            max(nz(row["Return1D"]), 0) * 1.4
+            + max(nz(row["Return5D"]), 0) * 0.45
+            + min(float(vol_ratio or 0), 5) * 3.0
+            + tech_score * 4.0
+            + min(nz(row["LiquidityBillion"]) / 100, 5)
+        )
+        records.append({
+            "Ticker": row["Ticker"],
+            "Industry": get_symbol_industry(row["Ticker"]),
+            "Close": round(float(row["Close"]), 2),
+            "Return1D": round(float(row["Return1D"]), 2) if pd.notna(row["Return1D"]) else None,
+            "Return5D": round(float(row["Return5D"]), 2) if pd.notna(row["Return5D"]) else None,
+            "LiquidityBillion": round(float(row["LiquidityBillion"]), 2),
+            "VolRatio": round(vol_ratio, 2) if vol_ratio is not None else None,
+            "RSI14": round(float(row["RSI14"]), 1) if pd.notna(row["RSI14"]) else None,
+            "MarketCapBillion": round(market_cap_billion, 2) if market_cap_billion is not None else None,
+            "NearHigh52WPct": round(near_high, 2) if near_high is not None else None,
+            "TechScore": tech_score,
+            "Score": round(score, 2),
+            "Reasons": reasons,
+        })
+
+    cap_values = [r["MarketCapBillion"] for r in records if r["MarketCapBillion"]]
+    cap_median = float(np.median(cap_values)) if cap_values else 0
+    notable = sorted(records, key=lambda item: item["Score"], reverse=True)[:20]
+    outflow = sorted(records, key=lambda item: (item["Return1D"] if item["Return1D"] is not None else 999, -item["LiquidityBillion"]))[:20]
+    niche = [
+        item for item in records
+        if item["MarketCapBillion"] and item["MarketCapBillion"] < cap_median
+        and (item["VolRatio"] or 0) >= 1.25
+        and (item["Return1D"] or 0) > 0
+        and item["TechScore"] >= 2
+    ]
+    niche = sorted(niche, key=lambda item: item["Score"], reverse=True)[:20]
+
+    return {
+        "date": latest_date,
+        "notable": notable,
+        "niche": niche,
+        "outflow": outflow,
+        "source": "database"
+    }
+
+
 @app.get("/api/sector-flow/results")
 def get_sector_flow_results(years: int = Query(3, ge=1, le=5), period: str = Query("60d")):
     return build_sector_flow_snapshot(years=years, period=period)
@@ -833,6 +1243,21 @@ def get_sector_flow_results(years: int = Query(3, ge=1, le=5), period: str = Que
 @app.get("/api/sector-flow/history")
 def get_sector_flow_history(years: int = Query(3, ge=1, le=5)):
     return build_sector_flow_history(years=years)
+
+
+@app.get("/api/price-return/history")
+def get_price_return_history(years: int = Query(3, ge=1, le=5)):
+    return build_price_return_history(years=years)
+
+
+@app.get("/api/ohlc/{symbol}")
+def get_ohlc_history(symbol: str, years: int = Query(3, ge=1, le=5)):
+    return get_ohlc_history_for_symbol(symbol, years=years)
+
+
+@app.get("/api/notable-stocks")
+def get_notable_stocks():
+    return build_notable_stocks_dashboard()
 
 
 @app.get("/api/export/sector-flow")
@@ -1017,6 +1442,402 @@ def export_sector_flow_matrix_excel(years: int = Query(3, ge=1, le=5)):
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=sector_flow_matrix_{data['end_date']}_{years}y.xlsx"}
+    )
+
+
+def get_ticker_industry_map():
+    mapping = {}
+    for industry, symbols in VN302_INDUSTRIES.items():
+        for symbol in symbols:
+            mapping[symbol] = industry
+    return mapping
+
+
+def style_matrix_headers(ws, max_col: int, max_row: int, freeze_cell: str = "B4"):
+    thin = Side(style="thin", color="B7B7B7")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+        for cell in row:
+            cell.border = border
+            cell.alignment = Alignment(horizontal="right" if cell.column > 1 and cell.row >= 4 else "center")
+    ws.freeze_panes = freeze_cell
+    ws.column_dimensions["A"].width = 14
+    for col_idx in range(2, max_col + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 12
+    ws.auto_filter.ref = f"A3:{get_column_letter(max_col)}{max_row}"
+
+
+def add_price_px_last_sheet(wb: Workbook, data: Dict[str, Any], metric: str, sheet_name: str):
+    ws = wb.create_sheet(title=sheet_name[:31])
+    industry_map = get_ticker_industry_map()
+    palette = ["002060", "7030A0", "00B050", "00B0F0", "FFC000", "92D050", "8064A2", "C00000", "808080", "4F81BD"]
+    industry_colors = {}
+    tickers = data.get("tickers", [])
+    key = "Close" if metric == "close" else "ReturnPct"
+    is_percent = metric == "return"
+
+    ws.cell(row=3, column=1, value="Dates")
+    for col_idx, symbol in enumerate(tickers, 2):
+        industry = industry_map.get(symbol, "Khac")
+        if industry not in industry_colors:
+            industry_colors[industry] = palette[len(industry_colors) % len(palette)]
+        fill = PatternFill(start_color=industry_colors[industry], end_color=industry_colors[industry], fill_type="solid")
+        font_color = "000000" if industry_colors[industry] in {"FFC000", "92D050", "00B0F0"} else "FFFFFF"
+        for row_idx, value in [(1, industry), (2, symbol), (3, "PX_LAST")]:
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.fill = fill if row_idx <= 2 else PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+            cell.font = Font(bold=True, color=font_color if row_idx <= 2 else "000000")
+            cell.alignment = Alignment(horizontal="center")
+    ws.cell(row=3, column=1).font = Font(bold=True)
+
+    green_fill = PatternFill(start_color="E2F0E9", end_color="E2F0E9", fill_type="solid")
+    red_fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
+    for row_idx, day in enumerate(data.get("rows", []), 4):
+        dt = datetime.strptime(day["Date"], "%Y-%m-%d")
+        ws.cell(row=row_idx, column=1, value=f"{dt.day}/{dt.month}/{dt.year}")
+        ws.cell(row=row_idx, column=1).font = Font(bold=True)
+        for col_idx, symbol in enumerate(tickers, 2):
+            raw_val = day["values"].get(symbol, {}).get(key)
+            value = None
+            if raw_val is not None and not pd.isna(raw_val):
+                value = float(raw_val) / 100.0 if is_percent else round(float(raw_val), 0)
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.number_format = "0.0%" if is_percent else "#,##0"
+            if is_percent and value is not None:
+                if value > 0:
+                    cell.fill = green_fill
+                elif value < 0:
+                    cell.fill = red_fill
+
+    style_matrix_headers(ws, len(tickers) + 1, len(data.get("rows", [])) + 3)
+    return ws
+
+
+def add_simple_rows_sheet(wb: Workbook, title: str, rows: List[Dict[str, Any]]):
+    ws = wb.create_sheet(title=title[:31])
+    headers = ["Ticker", "Industry", "Close", "Return1D", "Return5D", "LiquidityBillion", "VolRatio", "RSI14", "MarketCapBillion", "Score", "Reasons"]
+    ws.append(headers)
+    for item in rows:
+        ws.append([
+            item.get("Ticker"), item.get("Industry"), item.get("Close"), item.get("Return1D"),
+            item.get("Return5D"), item.get("LiquidityBillion"), item.get("VolRatio"),
+            item.get("RSI14"), item.get("MarketCapBillion"), item.get("Score"),
+            ", ".join(item.get("Reasons", []))
+        ])
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, len(rows) + 1)}"
+    for idx in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 18
+    return ws
+
+
+def add_sector_simple_sheet(wb: Workbook, data: Dict[str, Any], metric: str, sheet_name: str):
+    metric_map = {
+        "gtgd": ("GTGDBillion", "#,##0.00"),
+        "cap": ("CapBillion", "#,##0"),
+        "ratio": ("GTGDCapPct", "0.00%"),
+        "share": ("MarketSharePct", "0.00%"),
+    }
+    key, number_format = metric_map[metric]
+    is_percent = metric in {"ratio", "share"}
+    ws = wb.create_sheet(title=sheet_name[:31])
+    ws.cell(row=1, column=1, value="Dates")
+    for col_idx, industry in enumerate(data.get("industries", []), 2):
+        ws.cell(row=1, column=col_idx, value=industry)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+    for row_idx, day in enumerate(data.get("rows", []), 2):
+        dt = datetime.strptime(day["Date"], "%Y-%m-%d")
+        ws.cell(row=row_idx, column=1, value=f"{dt.day}/{dt.month}/{dt.year}")
+        for col_idx, industry in enumerate(data.get("industries", []), 2):
+            raw_val = day["values"].get(industry, {}).get(key)
+            value = None
+            if raw_val is not None and not pd.isna(raw_val):
+                value = float(raw_val) / 100.0 if is_percent else float(raw_val)
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.number_format = number_format
+    ws.freeze_panes = "B2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(data.get('industries', [])) + 1)}{len(data.get('rows', [])) + 1}"
+    ws.column_dimensions["A"].width = 14
+    for col_idx in range(2, len(data.get("industries", [])) + 2):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 16
+    return ws
+
+
+def add_stock_metric_sheet(wb: Workbook, years: int, metric: str, sheet_name: str):
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    max_date_str = get_latest_complete_market_date(cursor)
+    if not max_date_str:
+        conn.close()
+        return None
+    start_date = (datetime.strptime(max_date_str, "%Y-%m-%d") - pd.DateOffset(years=years)).strftime("%Y-%m-%d")
+    cursor.execute("SELECT symbol, outstanding_shares FROM ticker_shares")
+    shares_map = {row[0]: row[1] for row in cursor.fetchall()}
+    cursor.execute("""
+        SELECT symbol, time, close, volume
+        FROM historical_prices
+        WHERE time >= ? AND time <= ?
+    """, (start_date, max_date_str))
+    rows = cursor.fetchall()
+    conn.close()
+
+    available_symbols = {r[0] for r in rows}
+    tickers = [symbol for symbol in VN302 if symbol in available_symbols]
+    dates = sorted({r[1] for r in rows}, reverse=True)
+    prices = {}
+    volumes = {}
+    for symbol, dt, close_val, volume in rows:
+        if symbol not in VN302:
+            continue
+        prices.setdefault(dt, {})[symbol] = close_val
+        volumes.setdefault(dt, {})[symbol] = volume
+
+    wb_data = {
+        "tickers": tickers,
+        "rows": [],
+    }
+    for dt in dates:
+        values = {}
+        for symbol in tickers:
+            close_val = prices.get(dt, {}).get(symbol)
+            volume = volumes.get(dt, {}).get(symbol)
+            shares = get_outstanding_shares(symbol, shares_map)
+            if close_val is None or close_val <= 0:
+                values[symbol] = {}
+                continue
+            price_vnd = normalize_price(close_val)
+            if metric == "liquidity" and volume is not None:
+                values[symbol] = {"Value": price_vnd * int(volume) / 1_000_000_000}
+            elif metric == "cap" and shares:
+                values[symbol] = {"Value": price_vnd * shares / 1_000_000_000}
+            elif metric == "volcap" and shares and volume is not None:
+                values[symbol] = {"Value": int(volume) / shares}
+            else:
+                values[symbol] = {}
+        wb_data["rows"].append({"Date": dt, "values": values})
+
+    ws = wb.create_sheet(title=sheet_name[:31])
+    industry_map = get_ticker_industry_map()
+    ws.cell(row=3, column=1, value="Dates")
+    for col_idx, symbol in enumerate(tickers, 2):
+        ws.cell(row=1, column=col_idx, value=industry_map.get(symbol, "Khac"))
+        ws.cell(row=2, column=col_idx, value=symbol)
+        ws.cell(row=3, column=col_idx, value="PX_LAST" if metric != "volcap" else "VOL_CAP")
+    for row_idx in range(1, 4):
+        for cell in ws[row_idx]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="D9EAD3" if row_idx == 1 else "F2F2F2", end_color="D9EAD3" if row_idx == 1 else "F2F2F2", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+    for row_idx, day in enumerate(wb_data["rows"], 4):
+        dt = datetime.strptime(day["Date"], "%Y-%m-%d")
+        ws.cell(row=row_idx, column=1, value=f"{dt.day}/{dt.month}/{dt.year}")
+        for col_idx, symbol in enumerate(tickers, 2):
+            val = day["values"].get(symbol, {}).get("Value")
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.number_format = "0.00%" if metric == "volcap" else "#,##0.00"
+    ws.freeze_panes = "B4"
+    ws.auto_filter.ref = f"A3:{get_column_letter(len(tickers) + 1)}{len(wb_data['rows']) + 3}"
+    ws.column_dimensions["A"].width = 14
+    for col_idx in range(2, len(tickers) + 2):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 12
+    return ws
+
+
+@app.get("/api/export/price-return-matrix")
+def export_price_return_matrix_excel(years: int = Query(3, ge=1, le=5)):
+    data = build_price_return_history(years=years)
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    add_price_px_last_sheet(wb, data, "close", "Close price")
+    add_price_px_last_sheet(wb, data, "return", "Return pct")
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=price_return_matrix_{data['end_date']}_{years}y.xlsx"}
+    )
+
+
+@app.get("/api/export/close-matrix")
+def export_close_matrix_excel(years: int = Query(3, ge=1, le=5)):
+    data = build_price_return_history(years=years)
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+    wb = Workbook()
+    wb.remove(wb.active)
+    add_price_px_last_sheet(wb, data, "close", "Close price")
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=close_price_{data['end_date']}_{years}y.xlsx"}
+    )
+
+
+@app.get("/api/export/return-matrix")
+def export_return_matrix_excel(years: int = Query(3, ge=1, le=5)):
+    data = build_price_return_history(years=years)
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+    wb = Workbook()
+    wb.remove(wb.active)
+    add_price_px_last_sheet(wb, data, "return", "Return pct")
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=return_pct_{data['end_date']}_{years}y.xlsx"}
+    )
+
+
+def build_full_workbook_file(years: int = 3, progress_callback=None):
+    def progress(value, step):
+        if progress_callback:
+            progress_callback(value, step)
+
+    progress(3, "Äang Ä‘á»c dá»¯ liá»‡u Close/Return")
+    price_data = build_price_return_history(years=years)
+    progress(14, "Äang Ä‘á»c dá»¯ liá»‡u ngÃ nh")
+    sector_data = build_sector_flow_history(years=years)
+    progress(24, "Äang lá»c dashboard cá»• phiáº¿u")
+    notable_data = build_notable_stocks_dashboard()
+    if price_data.get("error"):
+        raise HTTPException(status_code=400, detail=price_data["error"])
+    if sector_data.get("error"):
+        raise HTTPException(status_code=400, detail=sector_data["error"])
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    progress(30, "Äang táº¡o sheet Close price")
+    add_price_px_last_sheet(wb, price_data, "close", "Close price")
+    progress(38, "Äang táº¡o sheet Return pct")
+    add_price_px_last_sheet(wb, price_data, "return", "Return pct")
+    progress(46, "Äang táº¡o sheet GTGD ngÃ nh")
+    add_sector_simple_sheet(wb, sector_data, "gtgd", "GTGD nganh")
+    progress(52, "Äang táº¡o sheet Vá»‘n hÃ³a ngÃ nh")
+    add_sector_simple_sheet(wb, sector_data, "cap", "Von hoa nganh")
+    progress(58, "Äang táº¡o sheet GTGD/Vá»‘n hÃ³a ngÃ nh")
+    add_sector_simple_sheet(wb, sector_data, "ratio", "GTGD von hoa nganh")
+    progress(64, "Äang táº¡o sheet Tá»· trá»ng ngÃ nh")
+    add_sector_simple_sheet(wb, sector_data, "share", "Ty trong nganh")
+    progress(70, "Äang táº¡o sheet Thanh khoáº£n cá»• phiáº¿u")
+    add_stock_metric_sheet(wb, years, "liquidity", "Thanh khoan CP")
+    progress(78, "Äang táº¡o sheet Vá»‘n hÃ³a cá»• phiáº¿u")
+    add_stock_metric_sheet(wb, years, "cap", "Von hoa CP")
+    progress(86, "Äang táº¡o sheet Vol/Cap cá»• phiáº¿u")
+    add_stock_metric_sheet(wb, years, "volcap", "VolCap CP")
+    if not notable_data.get("error"):
+        progress(92, "Äang táº¡o cÃ¡c sheet dashboard cá»• phiáº¿u")
+        add_simple_rows_sheet(wb, "Co dang chu y", notable_data.get("notable", []))
+        add_simple_rows_sheet(wb, "Niche dep", notable_data.get("niche", []))
+        add_simple_rows_sheet(wb, "Rut dong tien", notable_data.get("outflow", []))
+
+    output = io.BytesIO()
+    progress(96, "Äang ghi workbook ra file")
+    wb.save(output)
+    output.seek(0)
+    file_name = f"vnstock_full_workbook_{price_data['end_date']}_{years}y.xlsx"
+    return output, file_name
+
+
+@app.get("/api/export/full-workbook")
+def export_full_workbook_excel(years: int = Query(3, ge=1, le=5)):
+    output, file_name = build_full_workbook_file(years=years)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={file_name}"}
+    )
+
+
+def run_full_export_worker(years: int = 3):
+    state.full_export_state.update({
+        "running": True,
+        "progress": 0.0,
+        "step": "Báº¯t Ä‘áº§u xuáº¥t workbook",
+        "error": None,
+        "file_path": None,
+        "file_name": None,
+        "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "finished_at": None
+    })
+
+    def update_progress(value, step):
+        state.full_export_state["progress"] = round(float(value), 1)
+        state.full_export_state["step"] = step
+
+    try:
+        output, file_name = build_full_workbook_file(years=years, progress_callback=update_progress)
+        export_dir = os.path.join(os.getcwd(), "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        file_path = os.path.join(export_dir, file_name)
+        with open(file_path, "wb") as f:
+            f.write(output.getvalue())
+        state.full_export_state.update({
+            "progress": 100.0,
+            "step": "HoÃ n táº¥t, sáºµn sÃ ng táº£i file",
+            "file_path": file_path,
+            "file_name": file_name,
+            "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    except Exception as e:
+        state.full_export_state.update({
+            "error": str(e),
+            "step": f"Lá»—i xuáº¥t workbook: {e}"
+        })
+    finally:
+        state.full_export_state["running"] = False
+
+
+@app.post("/api/export/full-workbook/start")
+def start_full_workbook_export(background_tasks: BackgroundTasks, years: int = Query(3, ge=1, le=5)):
+    if state.full_export_state["running"]:
+        return {"status": "already_running"}
+    background_tasks.add_task(run_full_export_worker, years)
+    return {"status": "started"}
+
+
+@app.get("/api/export/full-workbook/status")
+def get_full_workbook_export_status():
+    return {
+        "running": state.full_export_state["running"],
+        "progress": state.full_export_state["progress"],
+        "step": state.full_export_state["step"],
+        "error": state.full_export_state["error"],
+        "ready": bool(state.full_export_state.get("file_path")) and not state.full_export_state["running"],
+        "file_name": state.full_export_state.get("file_name"),
+        "started_at": state.full_export_state.get("started_at"),
+        "finished_at": state.full_export_state.get("finished_at")
+    }
+
+
+@app.get("/api/export/full-workbook/download")
+def download_full_workbook_export():
+    file_path = state.full_export_state.get("file_path")
+    file_name = state.full_export_state.get("file_name")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File tá»•ng há»£p chÆ°a sáºµn sÃ ng.")
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=file_name
     )
 
 
@@ -2204,6 +3025,8 @@ def run_sync_historical_worker():
                 
             conn.close()
             print("Finished historical liquidity aggregation!")
+            print("Refreshing daily_price_return cache after historical sync...")
+            rebuild_price_return_cache()
             
     except Exception as e:
         print(f"Error in sync worker: {e}")
@@ -2236,8 +3059,39 @@ def get_sync_status():
         "progress": state.sync_state["progress"],
         "current": state.sync_state["current"],
         "total": state.sync_state["total"],
-        "error": state.sync_state["error"]
+        "error": state.sync_state["error"],
+        "last_auto_refresh_date": state.sync_state.get("last_auto_refresh_date"),
+        "auto_refresh_running": state.sync_state.get("auto_refresh_running", False),
+        "auto_refresh_time": "17:00 GMT+7"
     }
+
+
+def daily_5pm_refresh_scheduler():
+    while True:
+        try:
+            now = datetime.now()
+            today = now.strftime("%Y-%m-%d")
+            if now.hour == 17 and now.minute < 10 and state.sync_state.get("last_auto_refresh_date") != today:
+                if not state.sync_state["running"]:
+                    state.sync_state["auto_refresh_running"] = True
+                    print(f"Auto refresh 17:00 GMT+7 started for {today}")
+                    run_sync_historical_worker()
+                    if not state.shares_crawler_state["running"]:
+                        background_shares_crawler()
+                    state.sync_state["last_auto_refresh_date"] = today
+                    state.sync_state["auto_refresh_running"] = False
+                    print(f"Auto refresh 17:00 GMT+7 finished for {today}")
+            time.sleep(60)
+        except Exception as e:
+            state.sync_state["auto_refresh_running"] = False
+            state.sync_state["error"] = str(e)
+            print(f"Auto refresh scheduler error: {e}")
+            time.sleep(300)
+
+
+def start_daily_5pm_refresh_scheduler():
+    t = threading.Thread(target=daily_5pm_refresh_scheduler, daemon=True)
+    t.start()
 
 # --- 8. HISTORICAL PRICE NATIVE MODAL CHART DATA ---
 @app.get("/api/history/{symbol}")
@@ -3138,11 +3992,12 @@ def export_vol_cap_history():
 @app.on_event("startup")
 def on_startup():
     init_db_liquidity()
+    init_db_price_return_cache()
+    start_background_crawler()
+    start_price_return_cache_warmer()
     init_db_shares()
-    # Bypass crawlers in serverless environments to prevent request timeouts
-    if os.getenv("VERCEL") != "1":
-        start_background_crawler()
-        start_shares_crawler()
+    start_shares_crawler()
+    start_daily_5pm_refresh_scheduler()
 
 # Mount Static Files (Must be registered last to avoid route conflicts)
 app.mount("/", StaticFiles(directory="static"), name="static")
@@ -3150,4 +4005,4 @@ app.mount("/", StaticFiles(directory="static"), name="static")
 if __name__ == "__main__":
     import uvicorn
     # Launch uvicorn server on port 8000
-    uvicorn.run("web_server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("web_server:app", host="127.0.0.1", port=8080, reload=True)
